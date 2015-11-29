@@ -1,0 +1,27 @@
+- kernel module
+
+  * insmod module at boot time, so events can be captured right from
+   the start (and none will be missed)
+
+  * buffer raw events in kernel for netlink reliability, and/or
+   store/export raw events from kernel module (to process/unmarshall
+   later offline)
+
+  * configure kernel module with parameters during insmod (e.g., to
+   monitor specific or all apps) so that the module can be used
+   without the Java part; for example, to just look at the logs or to
+   export raw data
+
+- kernel/user space communication
+
+  * possible (even a good idea?) to restart MonitorMe app from kernel
+   module to fwd new events to Java land? Maybe via "int
+   call_usermodehelper(char * path, char ** argv, char ** envp, int
+   wait);"
+
+  * SElinux doesn't allow netlink anymore (work-around needed?)
+   
+- active monitoring
+
+  * idea: modify parameters in the copy_to_user memory before original
+   method will be called
