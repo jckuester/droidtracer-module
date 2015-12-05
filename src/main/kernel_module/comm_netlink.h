@@ -44,23 +44,24 @@
 #endif
 
 
-/* attributes (variables): the index in this enum is used as a reference for the type,
- *             userspace application has to indicate the corresponding type
- *             the policy is used for security considerations 
+/* attributes (variables): the index in this enum is used as a
+ *             reference for the type, userspace application has to
+ *             indicate the corresponding type the policy is used for
+ *             security considerations
  */
 enum {
-  ATTR_UNSPEC,
-  /* Linux UID of an app */
-  UID,  
-  /* Unix time stamp when an event is intercepted in the kernel */
-  TIME,
-  /* encoded Android API method name in binder_tranaction_data */
-  CODE,
-  /* byte array of intercepted Parcel object */
-  PARCEL,
-  /* name of the service interface */
-  SERVICE,
-  __ATTR_MAX,
+	ATTR_UNSPEC,
+	/* Linux UID of an app */
+	UID,  
+	/* Unix time stamp when an event is intercepted in the kernel */
+	TIME,
+	/* encoded Android API method name in binder_tranaction_data */
+	CODE,
+	/* byte array of intercepted Parcel object */
+	PARCEL,
+	/* name of the service interface */
+	SERVICE,
+	__ATTR_MAX,
 };
 #define ATTR_MAX (__ATTR_MAX - 1)
 
@@ -68,25 +69,41 @@ enum {
  * used by userspace application to identify command to be ececuted
  */
 enum {
-  CMD_UNSPEC,
-  ADD_APP,
-  DELETE_APP,
-  ADD_SERVICE_BLACKLIST,
-  SET_DROIDTRACER_UID,
-  ADD_SERVICE_WHITELIST,
-  /* enable interception for all apps on the device */
-  INTERCEPT_ALL_APPS,
-  __CMD_MAX,
+	CMD_UNSPEC,
+	ADD_APP,
+	DELETE_APP,
+	ADD_SERVICE_BLACKLIST,
+	SET_DROIDTRACER_UID,
+	ADD_SERVICE_WHITELIST,
+	/* enable interception for all apps on the device */
+	INTERCEPT_ALL_APPS,
+	__CMD_MAX,
 };
 #define CMD_MAX (__CMD_MAX - 1)
 
 #define VERSION_NR 1
 
 struct rbnode_service_name {
-  struct rb_node node_service_name;
-  char *name;
-  /* flag if service is part of white or black list */
-  uint8_t is_in_whitelist;
+	struct rb_node node_service_name;
+	char *name;
+	/* flag if service is part of white or black list */
+	uint8_t is_in_whitelist;
 };
+
+/* function declarations */
+int send_event(uint8_t, uint32_t, uint32_t, int, const void *, char *);
+struct rbnode_appuid *search_appuid(uint32_t);
+struct rbnode_services_len *search_service_len_blacklist(uint8_t);
+struct rbnode_service_name *search_service_blacklist(char *, uint8_t);
+int check_if_intercept(uint32_t);
+int intercept_all_apps(uint32_t);
+int droidtracer_register_genl_ops(void);
+
+/* global variables */
+extern uint32_t droidtracer_uid;
+extern uint8_t is_whitelist_empty;
+extern uint8_t appuid_counter;
+extern uint8_t intercept_all_apps_flag;
+extern struct genl_family droidtracer_family;
 
 #endif

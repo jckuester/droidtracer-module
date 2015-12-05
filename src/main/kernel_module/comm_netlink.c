@@ -22,11 +22,23 @@
 
 #include <net/genetlink.h>
 #include <linux/module.h>
+#define __NO_VERSION__
 #include <linux/kernel.h>
 #include <linux/kmod.h>
 #include "comm_netlink.h"
 
-/* PID of the java monitor app */
+static int insert_appuid(uint32_t appuid);
+static int insert_service_len_blacklist(uint8_t service_name_len);
+static int delete_appuid(uint32_t appuid);
+static int cb_delete_app(struct sk_buff *skb_2, struct genl_info *info);
+static int cb_intercept_all_apps(struct sk_buff *skb_2, struct genl_info *info);
+static int cb_set_droidtracer_uid(struct sk_buff *skb_2, struct genl_info *info);
+static int cb_add_service_whitelist(struct sk_buff *skb_2, struct genl_info *info);
+static int cb_add_app(struct sk_buff *skb_2, struct genl_info *info);
+static int cb_add_service_blacklist(struct sk_buff *skb_2, struct genl_info *info);
+static int insert_service_blacklist(char *service_name, uint8_t service_len, uint8_t is_in_whitelist);
+
+/* PID of the droidertracer service (living in java land) */
 uint32_t pid = -1;
 uint32_t droidtracer_uid = -1;
 // track every event sent to user space
@@ -36,238 +48,22 @@ uint32_t seq_id = 1;
 uint8_t intercept_all_apps_flag = false;
 uint8_t is_whitelist_empty = true;
 uint8_t appuid_counter = 0;
-/* nodes for rbtree
-   each contains UID of app to monitor */
-struct rbnode_appuid {
-  struct rb_node node;
-  uint32_t appuid;
+
+/* family definition */
+struct genl_family droidtracer_family = {
+	//generic netlink controller assigns channel number for us
+	.id = GENL_ID_GENERATE,        
+	.hdrsize = 0,
+	//the name of this new family we register
+	.name = "DROIDTRACER",        
+	.version = VERSION_NR,                   
+	.maxattr = ATTR_MAX,
 };
-
-/* nodes for rbtree
-   contains all service iface names with same length */
-struct rbnode_services_len {
-  struct rb_node node_service_len;
-  uint8_t len;
-  struct rb_root rbroot_services_name;
-};
-
-/*
- * self-balanced binary tree vs. hashmap
- * average complexity: O(log n) vs. O(1)
- * worst case complexity: O(log n) vs. O(n)
- */
-struct rb_root rbroot_appuid = RB_ROOT;
-
-/*
- * service interfaces that are not monitored
- */
-struct rb_root rbroot_services_blacklist = RB_ROOT;
-
-struct rbnode_appuid *search_appuid(uint32_t appuid)
-{
-  struct rb_node *node = rbroot_appuid.rb_node;
-  struct rbnode_appuid *data;
-  
-  while (node) {
-    data = rb_entry(node, struct rbnode_appuid, node); 
-    
-    if (appuid < data->appuid)
-      node = node->rb_left;
-    else if (appuid > data->appuid)
-      node = node->rb_right;
-    else
-      return data;
-  }
-  return NULL;
-}
-
-
-struct rbnode_services_len *search_service_len_blacklist(uint8_t service_name_len)
-{
-  struct rb_node *node = rbroot_services_blacklist.rb_node;
-  struct rbnode_services_len *data;
-  
-  //printk("RV; bla len=%d\n", service_name_len);
-
-  while (node) {
-    data = rb_entry(node, struct rbnode_services_len, node_service_len); 
-    
-    if (service_name_len < data->len)
-      node = node->rb_left;
-    else if (service_name_len > data->len)
-      node = node->rb_right;
-    else
-      return data;
-  }
-  return NULL;
-}
-
-
-struct rbnode_service_name *search_service_blacklist(char *service_name, uint8_t service_name_len)
-{
-  struct rb_node *node = search_service_len_blacklist(service_name_len)->rbroot_services_name.rb_node;
-  struct rbnode_service_name *data;
-  
-  //printk("RV; bla service=%s, len=%d\n", service_name, service_name_len);
-  if(node == NULL)
-    return NULL;
-
-  while (node) {
-    data = rb_entry(node, struct rbnode_service_name, node_service_name); 
-    
-    if (strcmp(service_name, data->name) < 0)
-      node = node->rb_left;
-    else if (strcmp(service_name, data->name) > 0)
-      node = node->rb_right;
-    else
-      return data;
-  }
-  return NULL;
-}
-
-
-static int insert_appuid(uint32_t appuid)
-{
-  struct rb_node **new = &(rbroot_appuid.rb_node), *parent = NULL;
-  struct rbnode_appuid *data;
-  struct rbnode_appuid *this;
-  
-  /* Figure out where to put new node */
-  while (*new) {
-    //this = container_of(*new, struct rbnode_appuid, node);
-    this = rb_entry(*new, struct rbnode_appuid, node);
-    parent = *new;
-
-    if (appuid < this->appuid)
-      new = &((*new)->rb_left);
-    else if (appuid > this->appuid)
-      new = &((*new)->rb_right);
-    else
-      return false;
-  }
-
-  /* Add new node and rebalance tree. */
-  data = kzalloc(sizeof(struct rbnode_appuid), GFP_KERNEL);
-
-  if(!data)
-    printk("RV; Error: cannot allocate memory for appuid=%d", appuid);  
-
-  data->appuid = appuid;
-  rb_link_node(&data->node, parent, new);
-  rb_insert_color(&data->node, &rbroot_appuid);
-
-  appuid_counter++;
-  return true;
-}
-
-static int insert_service_len_blacklist(uint8_t service_name_len)
-{
-  struct rb_node **new = &(rbroot_services_blacklist.rb_node), *parent = NULL;
-  struct rbnode_services_len *data;
-  struct rbnode_services_len *this;
-
-  /* Figure out where to put new node */
-  while (*new) {
-    this = rb_entry(*new, struct rbnode_services_len, node_service_len);
-    parent = *new;
-
-    if (service_name_len < this->len)
-      new = &((*new)->rb_left);
-    else if (service_name_len > this->len) 
-      new = &((*new)->rb_right);
-    else 
-      return false;    
-  }
-
-  /* Add new node and rebalance tree. */
-  data = kzalloc(sizeof(struct rbnode_services_len), GFP_KERNEL);
-
-  if(!data)
-    printk("RV; Error: cannot allocate memory for service_name_len node=%d", service_name_len);  
-
-  data->len = service_name_len;
-  data->rbroot_services_name = RB_ROOT;
-  rb_link_node(&data->node_service_len, parent, new);
-  rb_insert_color(&data->node_service_len, &rbroot_services_blacklist);
-
-  return true;
-}
-
-static int insert_service_blacklist(char *service_name, uint8_t service_len, uint8_t is_in_whitelist)
-{
-  struct rb_node **new = NULL, *parent = NULL;
-  struct rbnode_service_name *data;
-  struct rbnode_service_name *this;
-
-  insert_service_len_blacklist(service_len);
-  new = &(search_service_len_blacklist(service_len)->rbroot_services_name.rb_node);
-  
-  /* Figure out where to put new node */
-  while (*new) {
-    //this = container_of(*new, struct rbnode_appuid, node);
-    this = rb_entry(*new, struct rbnode_service_name, node_service_name);
-    parent = *new;
-
-    if (strcmp(service_name, this->name) < 0)
-      new = &((*new)->rb_left);
-    else if (strcmp(service_name, this->name) > 0)
-      new = &((*new)->rb_right);
-    else
-      return false;
-  }
-
-  /* Add new node and rebalance tree. */
-  data = kzalloc(sizeof(struct rbnode_service_name), GFP_KERNEL);
-
-  if(!data)
-    printk("RV; Error: cannot allocate memory for service_name node=%s", service_name);  
-
-  data->name = service_name;
-  if(is_in_whitelist) {
-    is_whitelist_empty = false;
-    data->is_in_whitelist = true;
-  } else {
-    data->is_in_whitelist = false;
-  }
-  rb_link_node(&data->node_service_name, parent, new);
-  rb_insert_color(&data->node_service_name, &search_service_len_blacklist(service_len)->rbroot_services_name);
-
-  return true;
-}
-
-static int delete_appuid(uint32_t appuid) {
-  struct rbnode_appuid *data = search_appuid(appuid);
-
-  if (data) {
-    rb_erase(&data->node, &rbroot_appuid);
-    kfree(data);
-
-    appuid_counter--;
-    return true;
-  }
-  return false;
-}
-
-
-int intercept_all_apps(uint32_t current_uid) {
-  if(intercept_all_apps_flag && droidtracer_uid != current_uid && current_uid > 10052) {
-    return true;
-  }
-  return false;
-}
-
-
-int check_if_intercept(uint32_t current_uid) {
-  if((search_appuid(current_uid) == NULL && !intercept_all_apps(current_uid)) || current_uid <= 10052) {
-    return true;
-  }
-  return false;
-}
 
 /* attribute policy: defines which attribute has which type (e.g int, char * etc)
  * possible values defined in net/netlink.h 
  */
-struct nla_policy policy[ATTR_MAX + 1] = {
+static struct nla_policy policy[ATTR_MAX + 1] = {
 	[TIME] = { .type = NLA_U32 },
 	[CODE] = { .type = NLA_U8 },
 	// send void* 
@@ -276,20 +72,113 @@ struct nla_policy policy[ATTR_MAX + 1] = {
 	[SERVICE] = { .type = NLA_STRING }
 };
 
-/* family definition */
-static struct genl_family doc_exmpl_gnl_family = {
-  //generic netlink controller assigns channel number for us
-  .id = GENL_ID_GENERATE,        
-  .hdrsize = 0,
-  //the name of this new family we register
-  .name = "DROIDTRACER",        
-  .version = VERSION_NR,                   
-  .maxattr = ATTR_MAX,
+/* nodes for rbtree
+   each contains UID of app to monitor */
+struct rbnode_appuid {
+	struct rb_node node;
+	uint32_t appuid;
+};
+
+/* nodes for rbtree
+   contains all service iface names with same length */
+struct rbnode_services_len {
+	struct rb_node node_service_len;
+	uint8_t len;
+	struct rb_root rbroot_services_name;
 };
 
 /*
-  http://man7.org/linux/man-pages/man7/netlink.7.html
+ * self-balanced binary tree vs. hashmap
+ * average complexity: O(log n) vs. O(1)
+ * worst case complexity: O(log n) vs. O(n)
+ */
+static struct rb_root rbroot_appuid = RB_ROOT;
 
+/*
+ * service interfaces that are not monitored
+ */
+static struct rb_root rbroot_services_blacklist = RB_ROOT;
+
+int intercept_all_apps(uint32_t current_uid) {
+	if (intercept_all_apps_flag && droidtracer_uid != current_uid && current_uid > 10052) 
+		return true;
+	else
+		return false;
+}
+
+int check_if_intercept(uint32_t current_uid) {
+	if ((search_appuid(current_uid) == NULL &&
+			!intercept_all_apps(current_uid)) ||
+		current_uid <= 10052)
+		return true;
+	else
+		return false;
+}
+
+struct rbnode_appuid *search_appuid(uint32_t appuid)
+{
+	struct rb_node *node = rbroot_appuid.rb_node;
+	struct rbnode_appuid *data;
+  
+	while (node) {
+		data = rb_entry(node, struct rbnode_appuid, node); 
+		
+		if (appuid < data->appuid)
+			node = node->rb_left;
+		else if (appuid > data->appuid)
+			node = node->rb_right;
+		else
+			return data;
+	}
+	return NULL;
+}
+
+struct rbnode_services_len *search_service_len_blacklist(uint8_t service_name_len)
+{
+	struct rb_node *node = rbroot_services_blacklist.rb_node;
+	struct rbnode_services_len *data;
+	
+	//printk("RV; bla len=%d\n", service_name_len);
+	
+	while (node) {
+		data = rb_entry(node, struct rbnode_services_len, node_service_len); 
+		
+		if (service_name_len < data->len)
+			node = node->rb_left;
+		else if (service_name_len > data->len)
+			node = node->rb_right;
+		else
+			return data;
+	}
+	return NULL;
+}
+
+
+struct rbnode_service_name *search_service_blacklist(char *service_name, uint8_t service_name_len)
+{
+	struct rb_node *node = search_service_len_blacklist(service_name_len)->rbroot_services_name.rb_node;
+	struct rbnode_service_name *data;
+	
+	//printk("RV; bla service=%s, len=%d\n", service_name, service_name_len);
+	if (node == NULL)
+		return NULL;
+	
+	while (node) {
+		data = rb_entry(node, struct rbnode_service_name, node_service_name); 
+		
+		if (strcmp(service_name, data->name) < 0)
+			node = node->rb_left;
+		else if (strcmp(service_name, data->name) > 0)
+			node = node->rb_right;
+		else
+			return data;
+	}
+	return NULL;
+}
+
+/*
+  http://man7.org/linux/man-pages/man7/netlink.7.html
+  
   Netlink  is  not a reliable protocol.  It tries its best to deliver a
   message to its destination(s), but may drop messages when an  out-of-
   memory  condition  or  other error occurs.  For reliable transfer the
@@ -311,454 +200,510 @@ static struct genl_family doc_exmpl_gnl_family = {
   sys_open->sdcard, ...)
 */
 int send_event(uint8_t method_id, uint32_t app_uid, 
-	       uint32_t time, int data_size, void *data, char *sys_call) 
+	       uint32_t time, int data_size, const void *data, char *sys_call) 
 {
-  struct sk_buff *skb;
-  void *msg_head;
-  int rc; 
-
-  if(pid < 0) {
-    printk("RV; Error: cannot send event, wrong pid of java-monitor\n");
-    return 1;
-  }
-   
-  /* send a message back*/
-  /* allocate some memory, since the size is not yet known use NLMSG_GOODSIZE*/	
-  /* do not free, genlmsg_unicast takes care, because message can be
-     stuck in the queue for a while */
-  skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
-  if(skb == NULL)
-    goto out;
-   
-  /* create the message headers */
-  /* arguments of genlmsg_put: 
-     struct sk_buff *, 
-     int (sending) pid, 
-     int sequence number, 
-     struct genl_family *, 
-     int flags, 
-     u8 command index (why do we need this?)
-  */
-  // TODO NL_AUTO_PORT, NL_AUTO_SEQ
-  // msg_head = genlmsg_put(skb, 0, 0, &doc_exmpl_gnl_family, 0, ADD_APP_TO_MONITOR);
-  msg_head = genlmsg_put(skb, 0, seq_id++, &doc_exmpl_gnl_family, 0, (int) NULL);
-  
-  if (msg_head == NULL) {
-    rc = -ENOMEM;
-    goto out;
-  }
-  
-  /* add attributes (actual values to be sent) */
-  if(sys_call != NULL) {
-    rc = nla_put_string(skb, SERVICE, sys_call);
-    if (rc != 0)
-      goto out;
-  }
-  rc = nla_put_u8(skb, CODE, method_id);
-  if (rc != 0)
-    goto out;
-  rc = nla_put_u32(skb, UID, app_uid);
-  if (rc != 0)
-    goto out;
-  rc = nla_put_u32(skb, TIME, time);
-  if (rc != 0)
-    goto out;
-  if(data != NULL) {
-    rc = nla_put(skb, PARCEL, data_size, data);
-    if (rc != 0)
-      goto out;    
-  }
-  
-  /* finalize the message */
-  genlmsg_end(skb, msg_head);
-
-  /* send the message back */
-  // for ARM (what is init_net???)
+	struct sk_buff *skb;
+	void *msg_head;
+	int rc; 
+	
+	if (pid < 0) {
+		printk("RV; Error: cannot send event, wrong pid of java-monitor\n");
+		return 1;
+	}
+	
+	/* send a message back*/
+	/* allocate some memory, since the size is not yet known use NLMSG_GOODSIZE*/	
+	/* do not free, genlmsg_unicast takes care, because message can be
+	   stuck in the queue for a while */
+	skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
+	if (skb == NULL)
+		goto out;
+	
+	/* create the message headers */
+	/* arguments of genlmsg_put: 
+	   struct sk_buff *, 
+	   int (sending) pid, 
+	   int sequence number, 
+	   struct genl_family *, 
+	   int flags, 
+	   u8 command index (why do we need this?)
+	*/
+	// TODO NL_AUTO_PORT, NL_AUTO_SEQ
+	// msg_head = genlmsg_put(skb, 0, 0, &doc_exmpl_gnl_family, 0, ADD_APP_TO_MONITOR);
+	msg_head = genlmsg_put(skb, 0, seq_id++, &droidtracer_family, 0, (int) NULL);
+	
+	if (msg_head == NULL) {
+		rc = -ENOMEM;
+		goto out;
+	}
+	
+	/* add attributes (actual values to be sent) */
+	if (sys_call != NULL) {
+		rc = nla_put_string(skb, SERVICE, sys_call);
+		if (rc != 0)
+			goto out;
+	}
+	rc = nla_put_u8(skb, CODE, method_id);
+	if (rc != 0)
+		goto out;
+	rc = nla_put_u32(skb, UID, app_uid);
+	if (rc != 0)
+		goto out;
+	rc = nla_put_u32(skb, TIME, time);
+	if (rc != 0)
+		goto out;
+	if (data != NULL) {
+		rc = nla_put(skb, PARCEL, data_size, data);
+		if (rc != 0)
+			goto out;    
+	}
+	
+	/* finalize the message */
+	genlmsg_end(skb, msg_head);
+	
+	/* send the message back */
+	// for ARM (what is init_net???)
 #ifdef ARM
-  rc = genlmsg_unicast(&init_net, skb, pid);
-  // for goldfish 
+	rc = genlmsg_unicast(&init_net, skb, pid);
+	// for goldfish 
 #elif defined GOLDFISH
-  rc = genlmsg_unicast(skb, pid);
+	rc = genlmsg_unicast(skb, pid);
 #endif
-  if (rc != 0)
-    goto out;
-
-  D(printk("RV; event sent to java-app with pid=%zu\n", pid));
-  return 0;
-  
+	if (rc != 0)
+		goto out;
+	
+	D(printk("RV; event sent to java-app with pid=%zu\n", pid));
+	return 0;
+	
  out:
-
-  // http://stackoverflow.com/questions/15676667/how-to-execute-shell-command-in-kernel-programming
-  /* static char *envp[] =  {  */
-  /*   "HOME=/",  */
-  /*   "PATH=/sbin:/system/sbin:/system/bin:/system/xbin", NULL }; */
-  /* char *argv[] = { "/system/bin/am", "start", "-a", "android.intent.action.MAIN",   */
-  /* 		 "-n", "com.monitorme/.MainActivity",  NULL}; */
-  /* /\* */
-  /* char * argv[] = { "/system/bin/am", */
-  /* 		    "startservice", */
-  /* 		    "-a", */
-  /* 		    "com.droidtracer.DroidTracerService", NULL }; */
-  /* *\/ */
-  /* rc = call_usermodehelper(argv[0], argv, envp, /\* UMH_WAIT_PROC *\/ UMH_WAIT_EXEC /\* 1 *\/); */
-  /* if(rc != 0) */
-  /*   printk("RV; cannot start DroidTracerService\n"); */
-
-  // TODO triggers anyway?
-  //printk("RV; an error occured in netlink communication.\n");
-  
-  return 0;
+	
+	// http://stackoverflow.com/questions/15676667/how-to-execute-shell-command-in-kernel-programming
+	/* static char *envp[] =  {  */
+	/*   "HOME=/",  */
+	/*   "PATH=/sbin:/system/sbin:/system/bin:/system/xbin", NULL }; */
+	/* char *argv[] = { "/system/bin/am", "start", "-a", "android.intent.action.MAIN",   */
+	/* 		 "-n", "com.monitorme/.MainActivity",  NULL}; */
+	/* /\* */
+	/* char * argv[] = { "/system/bin/am", */
+	/* 		    "startservice", */
+	/* 		    "-a", */
+	/* 		    "com.droidtracer.DroidTracerService", NULL }; */
+	/* *\/ */
+	/* rc = call_usermodehelper(argv[0], argv, envp, /\* UMH_WAIT_PROC *\/ UMH_WAIT_EXEC /\* 1 *\/); */
+	/* if (rc != 0) */
+	/*   printk("RV; cannot start DroidTracerService\n"); */
+	
+	// TODO triggers anyway?
+	//printk("RV; an error occured in netlink communication.\n");
+	
+	return 0;
 }
 
-int cb_add_app(struct sk_buff *skb_2, struct genl_info *info)  
+static int cb_add_app(struct sk_buff *skb_2, struct genl_info *info)  
 {
-  struct nlattr *na;
-  uint32_t appuid;
-
-  if (info == NULL)
-    printk("RV; an error occured in cb_add_app.\n");
-
-  pid = info->snd_pid;
-  
-  /*for each attribute there is an index in info->attrs which points to a nlattr structure
-   *in this structure the data is given
-   */
-  na = info->attrs[UID];
-  if (na) {
-    appuid = (uint32_t) nla_get_u32(na);
-    if(appuid == 0)
-      printk("RV; error while receiving data\n");
-    else {      
-      /* add appuid to rbtree */
-      if(insert_appuid(appuid)) {
-	printk("RV; start monitoring app with uid=%zu\n", appuid);
-      } else {
-	printk("RV; app with uid=%zu is already monitored\n", appuid);
-      }      
-    }  
-  } else {
-    printk("RV; no attr UID info->attrs=%i\n", UID);
-  }
-  
-  return 0;
+	struct nlattr *na;
+	uint32_t appuid;
+	
+	if (info == NULL)
+		printk("RV; an error occured in cb_add_app.\n");
+	
+	pid = info->snd_pid;
+	
+	/*for each attribute there is an index in info->attrs which points to a nlattr structure
+	 *in this structure the data is given
+	 */
+	na = info->attrs[UID];
+	if (na) {
+		appuid = (uint32_t) nla_get_u32(na);
+		if (appuid == 0)
+			printk("RV; error while receiving data\n");
+		else {      
+			/* add appuid to rbtree */
+			if (insert_appuid(appuid)) {
+				printk("RV; start monitoring app with uid=%zu\n", appuid);
+			} else {
+				printk("RV; app with uid=%zu is already monitored\n", appuid);
+			}      
+		}  
+	} else {
+		printk("RV; no attr UID info->attrs=%i\n", UID);
+	}
+	
+	return 0;
 }
 
-int cb_add_service_blacklist(struct sk_buff *skb_2, struct genl_info *info)  
+/* 
+ * register the operations for the family, i.e., 
+ * define what function handles which command
+ */
+int droidtracer_register_genl_ops(void)
 {
-  struct nlattr *na;
-  char *service_name;
+	int ret;
+	
+	/* define mappings between the command identifier
+	   and the actual handler */
+	static struct genl_ops ops_add_app = {
+		/* command */
+		.cmd = ADD_APP,
+		.flags = 0,
+		.policy = policy,
+		/* function that handles the received command */
+		.doit = cb_add_app,
+		.dumpit = NULL,
+	};
+	static struct genl_ops ops_delete_app = {
+		.cmd = DELETE_APP,
+		.flags = 0,
+		.policy = policy,
+		.doit = cb_delete_app,
+		.dumpit = NULL,
+	};
+	static struct genl_ops ops_add_service_blacklist = {
+		.cmd = ADD_SERVICE_BLACKLIST,
+		.flags = 0,
+		.policy = policy,
+		.doit = cb_add_service_blacklist,
+		.dumpit = NULL,
+	};
+	static struct genl_ops ops_add_service_whitelist = {
+		.cmd = ADD_SERVICE_WHITELIST,
+		.flags = 0,
+		.policy = policy,
+		.doit = cb_add_service_whitelist,
+		.dumpit = NULL,
+	};
+	static struct genl_ops ops_set_droidtracer_uid = {
+		.cmd = SET_DROIDTRACER_UID,
+		.flags = 0,
+		.policy = policy,
+		.doit = cb_set_droidtracer_uid,
+		.dumpit = NULL,
+	};
+	static struct genl_ops ops_intercept_all_apps = {
+		.cmd = INTERCEPT_ALL_APPS,
+		.flags = 0,
+		.policy = policy,
+		.doit = cb_intercept_all_apps,
+		.dumpit = NULL,
+	};
 
-  pid = info->snd_pid;
+	/* register operations for the family */
+	ret = genl_register_ops(&droidtracer_family, &ops_add_app);
+	if (!ret)
+		goto err;
 
-  if (info == NULL)
-    printk("RV; an error occured in cb_add_service_blacklist.\n");
-  
-  /*for each attribute there is an index in info->attrs which points to a nlattr structure
-   *in this structure the data is given
-   */
-  na = info->attrs[SERVICE];
-  if (na) {
-    // nla_len(na) is length of null terminated string
-    service_name = kmalloc(nla_len(na), GFP_KERNEL);
-    nla_strlcpy(service_name, na, nla_len(na));
-    //printk("RV; added service_name=%s, len=%d\n", service_name, nla_len(na));
-    if(service_name == NULL)
-      printk("RV; error while receiving data\n");
-    else {      
-      /* add appuid to rbtree */    
-      if(insert_service_blacklist(service_name, nla_len(na), false)) {
-	printk("RV; added service=%s to blacklist\n", service_name);
-      } else {
-	printk("RV; service=%s is already on blacklist\n", service_name);
-      }  
+	ret = genl_register_ops(&droidtracer_family, &ops_delete_app);
+	if (!ret)
+		goto err;
 
-    }  
-  } else {
-    printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
-  }
-  
-  return 0;
+	ret = genl_register_ops(&droidtracer_family, &ops_add_service_blacklist);
+	if (!ret)
+		goto err;
+	
+	ret = genl_register_ops(&droidtracer_family, &ops_add_service_whitelist);
+	if (!ret)
+		goto err;
+    
+	ret = genl_register_ops(&droidtracer_family, &ops_set_droidtracer_uid);
+	if (!ret)
+		goto err;
+
+	ret = genl_register_ops(&droidtracer_family, &ops_intercept_all_apps);
+	if (!ret)
+		goto err;
+	
+	return 0;
+ err:
+	printk(KERN_ERR "RV; failed to register operation = %i\n", ret);
+	/* unregister the family 
+	   note: all assigned operations are unregistered automatically */
+	genl_unregister_family(&droidtracer_family);
+	return -1;
 }
 
-int cb_add_service_whitelist(struct sk_buff *skb_2, struct genl_info *info)  
+static int cb_add_service_blacklist(struct sk_buff *skb_2, struct genl_info *info)  
 {
-  struct nlattr *na;
-  char *service_name;
-
-  pid = info->snd_pid;
-
-  if (info == NULL)
-    printk("RV; an error occured in cb_add_service_whitelist.\n");
-  
-  /*for each attribute there is an index in info->attrs which points to a nlattr structure
-   *in this structure the data is given
-   */
-  na = info->attrs[SERVICE];
-  if (na) {
-    // nla_len(na) is length of null terminated string
-    service_name = kmalloc(nla_len(na), GFP_KERNEL);
-    nla_strlcpy(service_name, na, nla_len(na));
-    //printk("RV; added service_name=%s, len=%d\n", service_name, nla_len(na));
-    if(service_name == NULL)
-      printk("RV; error while receiving data\n");
-    else {      
-      /* add appuid to rbtree */    
-      if(insert_service_blacklist(service_name, nla_len(na), true)) {
-	printk("RV; added service=%s to whitelist\n", service_name);
-      } else {
-	printk("RV; service=%s is already on whitelist\n", service_name);
-      }  
-
-    }  
-  } else {
-    printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
-  }
-  
-  return 0;
+	struct nlattr *na;
+	char *service_name;
+	
+	pid = info->snd_pid;
+	
+	if (info == NULL)
+		printk("RV; an error occured in cb_add_service_blacklist.\n");
+	
+	/*for each attribute there is an index in info->attrs which points to a nlattr structure
+	 *in this structure the data is given
+	 */
+	na = info->attrs[SERVICE];
+	if (na) {
+		// nla_len(na) is length of null terminated string
+		service_name = kmalloc(nla_len(na), GFP_KERNEL);
+		nla_strlcpy(service_name, na, nla_len(na));
+		//printk("RV; added service_name=%s, len=%d\n", service_name, nla_len(na));
+		if (service_name == NULL)
+			printk("RV; error while receiving data\n");
+		else {      
+			/* add appuid to rbtree */    
+			if (insert_service_blacklist(service_name, nla_len(na), false)) {
+				printk("RV; added service=%s to blacklist\n", service_name);
+			} else {
+				printk("RV; service=%s is already on blacklist\n", service_name);
+			}  
+			
+		}  
+	} else {
+		printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
+	}
+	
+	return 0;
 }
 
-int cb_set_droidtracer_uid(struct sk_buff *skb_2, struct genl_info *info)  
+static int cb_add_service_whitelist(struct sk_buff *skb_2, struct genl_info *info)  
 {
-  struct nlattr *na;
-  uint32_t uid;
+	struct nlattr *na;
+	char *service_name;
+	
+	pid = info->snd_pid;
+	
+	if (info == NULL)
+		printk("RV; an error occured in cb_add_service_whitelist.\n");
+	
+	/*for each attribute there is an index in info->attrs which points to a nlattr structure
+	 *in this structure the data is given
+	 */
+	na = info->attrs[SERVICE];
+	if (na) {
+		// nla_len(na) is length of null terminated string
+		service_name = kmalloc(nla_len(na), GFP_KERNEL);
+		nla_strlcpy(service_name, na, nla_len(na));
+		//printk("RV; added service_name=%s, len=%d\n", service_name, nla_len(na));
+		if (service_name == NULL)
+			printk("RV; error while receiving data\n");
+		else {      
+			/* add appuid to rbtree */    
+			if (insert_service_blacklist(service_name, nla_len(na), true)) {
+				printk("RV; added service=%s to whitelist\n", service_name);
+			} else {
+				printk("RV; service=%s is already on whitelist\n", service_name);
+			}  
+			
+		}  
+	} else {
+		printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
+	}
+	
+	return 0;
+}
 
+static int cb_set_droidtracer_uid(struct sk_buff *skb_2, struct genl_info *info)  
+{
+	struct nlattr *na;
+	uint32_t uid;
+	
   if (info == NULL)
-    printk("RV; an error occured in cb_set_droidtracer_uid.\n");
+	  printk("RV; an error occured in cb_set_droidtracer_uid.\n");
   
   /* TODO set pid only the first time function is called */
   pid = info->snd_pid;
-
-  na = info->attrs[UID];
-  if (na) {
-
-    uid = (uint32_t) nla_get_u32(na);
-    if(uid) {
-      // set droidtracer uid
-      droidtracer_uid = uid;
-      intercept_all_apps_flag = true;    
-      printk("RV; set droidtracer uid=%d.\n", uid);
-    }   
-  } else {
-    printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
-  }
   
+  na = info->attrs[UID];
+  if (na) {	  
+	  uid = (uint32_t) nla_get_u32(na);
+	  if (uid) {
+		  // set droidtracer uid
+		  droidtracer_uid = uid;
+		  intercept_all_apps_flag = true;    
+		  printk("RV; set droidtracer uid=%d.\n", uid);
+	  }   
+  } else {
+	  printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
+  }  
   return 0;
 }
 
-int cb_intercept_all_apps(struct sk_buff *skb_2, struct genl_info *info)  
+static int cb_intercept_all_apps(struct sk_buff *skb_2, struct genl_info *info)  
 {
-  struct nlattr *na;
-  uint32_t uid;
-
-  if (info == NULL)
-    printk("RV; an error occured in cb_intercept_all_apps.\n");
-  
-  /* TODO set pid only the first time function is called */
-  pid = info->snd_pid;
-
-  na = info->attrs[UID];
-  if (na) {
-
-    uid = (uint32_t) nla_get_u32(na);
-    if(uid) {
-      // set droidtracer uid
-      droidtracer_uid = uid;
-      intercept_all_apps_flag = true;    
-      printk("RV; intercepting all apps enabled.\n");
-    } else {
-      // if you user sends 0 (instead of real droidtracer uid) means false
-      intercept_all_apps_flag = false;
-      printk("RV; intercepting all apps disabled.\n");
-    }   
-  } else {
-    printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
-  }
-  
-  return 0;
+	struct nlattr *na;
+	uint32_t uid;
+	
+	if (info == NULL)
+		printk("RV; an error occured in cb_intercept_all_apps.\n");
+	
+	/* TODO set pid only the first time function is called */
+	pid = info->snd_pid;
+	
+	na = info->attrs[UID];
+	if (na) {		
+		uid = (uint32_t) nla_get_u32(na);
+		if (uid) {
+			// set droidtracer uid
+			droidtracer_uid = uid;
+			intercept_all_apps_flag = true;    
+			printk("RV; intercepting all apps enabled.\n");
+		} else {
+			// if you user sends 0 (instead of real droidtracer uid) means false
+			intercept_all_apps_flag = false;
+			printk("RV; intercepting all apps disabled.\n");
+		}   
+	} else {
+		printk("RV; no attr SERVICE info->attrs=%i\n", SERVICE);
+	}	
+	return 0;
 }
 
 /*
  * callback method to delete app
  */
-int cb_delete_app(struct sk_buff *skb_2, struct genl_info *info)  
+static int cb_delete_app(struct sk_buff *skb_2, struct genl_info *info)  
 {
-  struct nlattr *na;
-  uint32_t appuid;
-
-  if (info == NULL)
-    printk("RV; an error occured in cb_delete_app.\n");
-
-  pid = info->snd_pid;
-  
-  /*for each attribute there is an index in info->attrs which points to a nlattr structure
-   *in this structure the data is given
-   */
-  na = info->attrs[UID];
-  if (na) {
-    appuid = (uint32_t) nla_get_u32(na);
-    if(appuid == 0)
-      printk("RV; error while receiving data\n");
-    else {      
-      /* delete appuid from rbtree */
-      if(delete_appuid(appuid)) {
-	printk("RV; stop monitoring app with uid=%zu\n", appuid);
-      } else {
-	printk("RV; app with uid=%zu is not monitored\n", appuid);
-      }      
-    }  
-  } else {
-    printk("RV; no info->attrs %i\n", UID);
-  }
-  
-  return 0;
+	struct nlattr *na;
+	uint32_t appuid;
+	
+	if (info == NULL)
+		printk("RV; an error occured in cb_delete_app.\n");
+	
+	pid = info->snd_pid;
+	
+	/*for each attribute there is an index in info->attrs which points to a nlattr structure
+	 *in this structure the data is given
+	 */
+	na = info->attrs[UID];
+	if (na) {
+		appuid = (uint32_t) nla_get_u32(na);
+		if (appuid == 0)
+			printk("RV; error while receiving data\n");
+		else {      
+			/* delete appuid from rbtree */
+			if (delete_appuid(appuid)) {
+				printk("RV; stop monitoring app with uid=%zu\n", appuid);
+			} else {
+				printk("RV; app with uid=%zu is not monitored\n", appuid);
+			}      
+		}  
+	} else {
+		printk("RV; no info->attrs %i\n", UID);
+	}	
+	return 0;
 }
 
-/* commands: mapping between the command enumeration and the actual function*/
-struct genl_ops ops_add_app = {
-	.cmd = ADD_APP,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_add_app,
-	.dumpit = NULL,
-};
-struct genl_ops ops_delete_app = {
-	.cmd = DELETE_APP,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_delete_app,
-	.dumpit = NULL,
-};
-struct genl_ops ops_add_service_blacklist = {
-	.cmd = ADD_SERVICE_BLACKLIST,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_add_service_blacklist,
-	.dumpit = NULL,
-};
-struct genl_ops ops_add_service_whitelist = {
-	.cmd = ADD_SERVICE_WHITELIST,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_add_service_whitelist,
-	.dumpit = NULL,
-};
-struct genl_ops ops_set_droidtracer_uid = {
-	.cmd = SET_DROIDTRACER_UID,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_set_droidtracer_uid,
-	.dumpit = NULL,
-};
-struct genl_ops ops_intercept_all_apps = {
-	.cmd = INTERCEPT_ALL_APPS,
-	.flags = 0,
-	.policy = policy,
-	/* method which handles the callback */
-	.doit = cb_intercept_all_apps,
-	.dumpit = NULL,
-};
-
-int init_netlink(void)
+static int insert_appuid(uint32_t appuid)
 {
-  int rc;
-  printk("RV; init netlink communication\n");  
- 
-  /* registers the new family name with the Generic Netlink
-     mechanism */  
-  rc = genl_register_family(&doc_exmpl_gnl_family);
-  if (rc != 0)
-    goto failure;
+	struct rb_node **new = &(rbroot_appuid.rb_node), *parent = NULL;
+	struct rbnode_appuid *data;
+	struct rbnode_appuid *this;
+	
+	/* Figure out where to put new node */
+	while (*new) {
+		//this = container_of(*new, struct rbnode_appuid, node);
+		this = rb_entry(*new, struct rbnode_appuid, node);
+		parent = *new;
+		
+		if (appuid < this->appuid)
+			new = &((*new)->rb_left);
+		else if (appuid > this->appuid)
+			new = &((*new)->rb_right);
+		else
+			return false;
+	}
 
-  /*register functions (commands) of the new family*/
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_add_app);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }  
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_delete_app);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }  
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_add_service_blacklist);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_add_service_whitelist);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }    
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_set_droidtracer_uid);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }    
-  rc = genl_register_ops(&doc_exmpl_gnl_family, &ops_intercept_all_apps);
-  if (rc != 0){
-    printk("RV; register ops: %i\n",rc);
-    genl_unregister_family(&doc_exmpl_gnl_family);
-    goto failure;
-  }  
-
+	/* Add new node and rebalance tree. */
+	data = kzalloc(sizeof(struct rbnode_appuid), GFP_KERNEL);
+	
+	if (!data)
+		printk("RV; Error: cannot allocate memory for appuid=%d", appuid);  
+	
+	data->appuid = appuid;
+	rb_link_node(&data->node, parent, new);
+	rb_insert_color(&data->node, &rbroot_appuid);
   
-  //char *argv[] = { "/system/bin/am", "start", "-a", "android.intent.action.MAIN",  
-  //		 "-n", "com.monitorme/.MainActivity",  NULL};
-  
-  // char *argv[] = { "/system/bin/sh", "-c", "am start -a android.intent.action.MAIN -n com.monitorme/.MainActivity", NULL};
-  //char *argv[] = { "/system/bin/ls", NULL};
-  //static char *envp[] =  { 
-  //  "HOME=/", 
-  //  "PATH=/sbin:/system/sbin:/system/bin:/system/xbin", NULL };
- 
-  /*
-  char * argv[] = { "/system/bin/am",
-		    "startservice",
-		    "-a",
-		    "com.droidtracer.DroidTracerService", NULL };
-  */
-
-  //rc = call_usermodehelper(argv[0], argv, envp, /* UMH_WAIT_PROC */  UMH_WAIT_EXEC  /*1*/);
-  //if(rc != 0) {
-  //  printk("RV; cannot start DroidTracerService\n");
-  //}
-
-  return 0;
-  
- failure:
-  printk("RV; error: initializing netlink communication\n");
-  return -1;
+	appuid_counter++;
+	return true;
 }
 
-void exit_netlink(void)
+static int insert_service_len_blacklist(uint8_t service_name_len)
 {
-        int ret;
-        printk("RV; exit netlink communication\n");
-        /*unregister the functions*/
-	ret = genl_unregister_ops(&doc_exmpl_gnl_family, &ops_add_app);
-	if(ret != 0){
-	  printk("RV; unregister ops: %i\n",ret);
-	  return;
-        }
-	ret = genl_unregister_ops(&doc_exmpl_gnl_family, &ops_delete_app);
-	if(ret != 0){
-	  printk("RV; unregister ops: %i\n",ret);
-	  return;
-        }
-        /*unregister the family*/
-	ret = genl_unregister_family(&doc_exmpl_gnl_family);
-	if(ret !=0){
-                printk("RV; unregister family %i\n",ret);
-        }
+	struct rb_node **new = &(rbroot_services_blacklist.rb_node), *parent = NULL;
+	struct rbnode_services_len *data;
+	struct rbnode_services_len *this;
+	
+	/* Figure out where to put new node */
+	while (*new) {
+		this = rb_entry(*new, struct rbnode_services_len, node_service_len);
+		parent = *new;
+	  
+		if (service_name_len < this->len)
+			new = &((*new)->rb_left);
+		else if (service_name_len > this->len) 
+			new = &((*new)->rb_right);
+		else 
+			return false;    
+	}
+	
+	/* Add new node and rebalance tree. */
+	data = kzalloc(sizeof(struct rbnode_services_len), GFP_KERNEL);
+  
+	if (!data)
+		printk("RV; Error: cannot allocate memory for service_name_len node=%d", service_name_len);  
+	
+	data->len = service_name_len;
+	data->rbroot_services_name = RB_ROOT;
+	rb_link_node(&data->node_service_len, parent, new);
+	rb_insert_color(&data->node_service_len, &rbroot_services_blacklist);
+	
+	return true;
+}
+
+static int insert_service_blacklist(char *service_name, uint8_t service_len, uint8_t is_in_whitelist)
+{
+	struct rb_node **new = NULL, *parent = NULL;
+	struct rbnode_service_name *data;
+	struct rbnode_service_name *this;
+	
+	insert_service_len_blacklist(service_len);
+	new = &(search_service_len_blacklist(service_len)->rbroot_services_name.rb_node);
+	
+	/* Figure out where to put new node */
+	while (*new) {
+		//this = container_of(*new, struct rbnode_appuid, node);
+		this = rb_entry(*new, struct rbnode_service_name, node_service_name);
+		parent = *new;
+		
+		if (strcmp(service_name, this->name) < 0)
+			new = &((*new)->rb_left);
+		else if (strcmp(service_name, this->name) > 0)
+			new = &((*new)->rb_right);
+		else
+			return false;
+  }
+	
+	/* Add new node and rebalance tree. */
+	data = kzalloc(sizeof(struct rbnode_service_name), GFP_KERNEL);
+	
+	if (!data)
+		printk("RV; Error: cannot allocate memory for service_name node=%s", service_name);  
+	
+	data->name = service_name;
+	if (is_in_whitelist) {
+		is_whitelist_empty = false;
+		data->is_in_whitelist = true;
+	} else {
+		data->is_in_whitelist = false;
+	}
+	rb_link_node(&data->node_service_name, parent, new);
+	rb_insert_color(&data->node_service_name, &search_service_len_blacklist(service_len)->rbroot_services_name);
+	
+	return true;
+}
+
+static int delete_appuid(uint32_t appuid) {
+	struct rbnode_appuid *data = search_appuid(appuid);
+	
+	if (data) {
+		rb_erase(&data->node, &rbroot_appuid);
+		kfree(data);
+
+		appuid_counter--;
+		return true;
+	}
+	return false;
 }

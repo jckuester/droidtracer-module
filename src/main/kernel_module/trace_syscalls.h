@@ -46,15 +46,15 @@ struct binder_stats {
 static struct binder_stats binder_stats;
 
 struct binder_work {
-  struct list_head entry;
-  enum {
-    BINDER_WORK_TRANSACTION = 1,
-    BINDER_WORK_TRANSACTION_COMPLETE,
-    BINDER_WORK_NODE,
-    BINDER_WORK_DEAD_BINDER,
-    BINDER_WORK_DEAD_BINDER_AND_CLEAR,
-    BINDER_WORK_CLEAR_DEATH_NOTIFICATION,
-  } type;
+	struct list_head entry;
+	enum {
+		BINDER_WORK_TRANSACTION = 1,
+		BINDER_WORK_TRANSACTION_COMPLETE,
+		BINDER_WORK_NODE,
+		BINDER_WORK_DEAD_BINDER,
+		BINDER_WORK_DEAD_BINDER_AND_CLEAR,
+		BINDER_WORK_CLEAR_DEATH_NOTIFICATION,
+	} type;
 };
 
 struct binder_proc {
@@ -92,97 +92,96 @@ struct binder_proc {
 };
 
 struct binder_thread {
-  struct binder_proc *proc;
-  struct rb_node rb_node;
-  int pid;
-  int looper;
-  struct binder_transaction *transaction_stack;
-  struct list_head todo;
-  uint32_t return_error; /* Write failed, return error code in read buf */
-  uint32_t return_error2; /* Write failed, return error code in read */
-  /* buffer. Used when sending a reply to a dead process that */
-  /* we are also waiting on */
-  wait_queue_head_t wait;
-  struct binder_stats stats;
+	struct binder_proc *proc;
+	struct rb_node rb_node;
+	int pid;
+	int looper;
+	struct binder_transaction *transaction_stack;
+	struct list_head todo;
+	uint32_t return_error; /* Write failed, return error code in read buf */
+	uint32_t return_error2; /* Write failed, return error code in read */
+	/* buffer. Used when sending a reply to a dead process that */
+	/* we are also waiting on */
+	wait_queue_head_t wait;
+	struct binder_stats stats;
 };
 
 struct binder_transaction {
-  int debug_id;
-  struct binder_work work;
-  struct binder_thread *from;
-  struct binder_transaction *from_parent;
-  struct binder_proc *to_proc;
-  struct binder_thread *to_thread;
-  struct binder_transaction *to_parent;
-  unsigned need_reply : 1;
-  /*unsigned is_dead : 1;*/ /* not used at the moment */
-
-  struct binder_buffer *buffer;
-  unsigned int    code;
-  unsigned int    flags;
-  long    priority;
-  long    saved_priority;
-  uid_t   sender_euid;
+	int debug_id;
+	struct binder_work work;
+	struct binder_thread *from;
+	struct binder_transaction *from_parent;
+	struct binder_proc *to_proc;
+	struct binder_thread *to_thread;
+	struct binder_transaction *to_parent;
+	unsigned need_reply : 1;
+	/*unsigned is_dead : 1;*/ /* not used at the moment */
+	
+	struct binder_buffer *buffer;
+	unsigned int    code;
+	unsigned int    flags;
+	long    priority;
+	long    saved_priority;
+	uid_t   sender_euid;
 };
 
 struct binder_buffer {
-  struct list_head entry; /* free and allocated entries by addesss */
-  struct rb_node rb_node; /* free entry by size or allocated entry */
-  /* by address */
-  unsigned free : 1;
-  unsigned allow_user_free : 1;
-  unsigned async_transaction : 1;
-  unsigned debug_id : 29;
-
-  struct binder_transaction *transaction;
-
-  struct binder_node *target_node;
-  size_t data_size;
-  size_t offsets_size;
-  uint8_t data[0];
+	struct list_head entry; /* free and allocated entries by addesss */
+	struct rb_node rb_node; /* free entry by size or allocated entry */
+	/* by address */
+	unsigned free : 1;
+	unsigned allow_user_free : 1;
+	unsigned async_transaction : 1;
+	unsigned debug_id : 29;
+	
+	struct binder_transaction *transaction;
+	
+	struct binder_node *target_node;
+	size_t data_size;
+	size_t offsets_size;
+	uint8_t data[0];
 };
 
 
 struct binder_ref {
-  /* Lookups needed: */
-  /*   node + proc => ref (transaction) */
-  /*   desc + proc => ref (transaction, inc/dec ref) */
-  /*   node => refs + procs (proc exit) */
-  int debug_id;
-  struct rb_node rb_node_desc;
-  struct rb_node rb_node_node;
-  struct hlist_node node_entry;
-  struct binder_proc *proc;
-  struct binder_node *node;
-  uint32_t desc;
-  int strong;
-  int weak;
+	/* Lookups needed: */
+	/*   node + proc => ref (transaction) */
+	/*   desc + proc => ref (transaction, inc/dec ref) */
+	/*   node => refs + procs (proc exit) */
+	int debug_id;
+	struct rb_node rb_node_desc;
+	struct rb_node rb_node_node;
+	struct hlist_node node_entry;
+	struct binder_proc *proc;
+	struct binder_node *node;
+	uint32_t desc;
+	int strong;
+	int weak;
   struct binder_ref_death *death;
 };
 
 struct binder_node {
-  int debug_id;
-  struct binder_work work;
-  union {
-    struct rb_node rb_node;
-    struct hlist_node dead_node;
+	int debug_id;
+	struct binder_work work;
+	union {
+		struct rb_node rb_node;
+		struct hlist_node dead_node;
   };
-  struct binder_proc *proc;
-  struct hlist_head refs;
-  int internal_strong_refs;
-  int local_weak_refs;
-  int local_strong_refs;
-  void __user *ptr;
-  void __user *cookie;
-  unsigned has_strong_ref : 1;
-  unsigned pending_strong_ref : 1;
-  unsigned has_weak_ref : 1;
-  unsigned pending_weak_ref : 1;
-  unsigned has_async_transaction : 1;
-  unsigned accept_fds : 1;
-  int min_priority : 8;
-  struct list_head async_todo;
+	struct binder_proc *proc;
+	struct hlist_head refs;
+	int internal_strong_refs;
+	int local_weak_refs;
+	int local_strong_refs;
+	void __user *ptr;
+	void __user *cookie;
+	unsigned has_strong_ref : 1;
+	unsigned pending_strong_ref : 1;
+	unsigned has_weak_ref : 1;
+	unsigned pending_weak_ref : 1;
+	unsigned has_async_transaction : 1;
+	unsigned accept_fds : 1;
+	int min_priority : 8;
+	struct list_head async_todo;
 };
-
 
 #endif
