@@ -43,7 +43,13 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jan-Christoph Kuester <jckuester@gmail.com>");
-MODULE_DESCRIPTION("DroidTracer: intercepting Android's binder and other syscalls via kprobes");
+MODULE_DESCRIPTION("Trace Android's Binder and other syscalls via kprobes");
+
+/* if set to value 0, all apps are traced (UID 0 is root) */
+int lowest_uid_traced = INT_MAX;
+
+module_param(lowest_uid_traced, int, 0000);
+MODULE_PARM_DESC(myint, "Trace all UIDs above threshold");
 
 /*
  * removes every second 0 from sequence of uint8_t
@@ -240,7 +246,7 @@ asmlinkage long trace_sys_recvmsg(int fd, struct msghdr __user * msg,
  * do_execve() is system-independent routine of sys_execve()
  * TODO intercept argv
  */
-static int trace_do_execve(char *filename, char __user *__user *argv,
+int trace_do_execve(char *filename, char __user *__user *argv,
 			   char __user *__user *envp, struct pt_regs *regs)
 {
 	int ret;
@@ -389,7 +395,7 @@ asmlinkage long trace_sys_open(const char __user *filename, int flags, int mode)
 typedef u_int32_t socklen_t;
 #endif
 
-static long trace_sys_connect(int sockfd, const struct sockaddr *addr,
+long trace_sys_connect(int sockfd, const struct sockaddr *addr,
 			      socklen_t addrlen)
 {
 	struct timespec ts;
@@ -439,35 +445,32 @@ static long trace_sys_connect(int sockfd, const struct sockaddr *addr,
  * monitored by jprobes
  */
 static int trace_binder_thread_write(struct binder_proc *proc,
-				struct binder_thread *thread, void __user *buffer,
+				struct binder_thread *thread,
+				void __user *buffer,
 				int size, signed long *consumed)
 {
 	uint32_t cmd;
 	void __user *ptr = buffer + *consumed;
 	void __user *end = buffer + size;
 	uint8_t is_appuid_monitored;
-	char *service_name;
+	char *iface;
+	char *tmp;
 	//int i;
 	//int j;
 	//int k;
 	//uint8_t *buffer_tmp;			
 	//uint8_t *buffer_tmp2;			
-	
-	/* nerver monitor droidtracer itself */
-	if (current->cred->uid == droidtracer_uid ||
-	   /* only continue if > 0 apps monitored */
-	   (appuid_counter == 0 && !intercept_all_apps_flag))	   
-		jprobe_return();
 
-	/* specify range 
-	   1000 <= uid <= 10051
-	 */
-	
 	is_appuid_monitored = (search_appuid(current->cred->uid) != NULL);
-	/* only monitor apps in list apps_uid_to_monitor */
-	if (!is_appuid_monitored &&
-		!intercept_all_apps(current->cred->uid) &&
-		is_whitelist_empty) 
+
+	//printk("RV; lowest_uid=%d", lowest_uid_traced);
+
+	/* nerver monitor droidtracer itself 
+	 * OR UIDs under threshold (if UID is not explicitly monitored) */
+	if (current->cred->uid == droidtracer_uid || 
+		(current->cred->uid < lowest_uid_traced && 
+			is_appuid_monitored &&
+			is_whitelist_empty))
 		jprobe_return();
 	
 	while (ptr < end && thread->return_error == BR_OK) {
@@ -503,51 +506,38 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 				struct timespec ts;
 				getnstimeofday(&ts);
 				
-				service_name = kmalloc((*service_name_len_ptr)+1, GFP_KERNEL);
-				if (!service_name)
-					D(printk("RV; cannot allocate memory for service_name.\n"));	  
-				binder_data_tostr(service_name_ptr, *service_name_len_ptr, service_name);
-				D(printk("RV; to check service_name=%s, len=%d\n", service_name, (*service_name_len_ptr)+1));  
+				iface = kmalloc((*service_name_len_ptr)+1, GFP_KERNEL);
+				if (!iface) {
+					printk(KERN_WARNING "RV; cannot allocate memory for interface name.\n");
+					jprobe_return();
+				}
+				binder_data_tostr(service_name_ptr, *service_name_len_ptr, iface);
+				D(printk("RV; interface=%s, len=%d\n", iface, (*service_name_len_ptr)+1));  
 				
 				/* do NOT monitor services in blacklist, but those in whitelist */
-				if (search_service_len_blacklist((*service_name_len_ptr)+1) != NULL) {
-					
-					/*
-					  char *service_name;
-					  service_name = kmalloc((*service_name_len_ptr)+1, GFP_KERNEL);
-					  if (!service_name)
-					  D(printk("RV; cannot allocate memory for service_name.\n"));	  
-					  binder_data_tostr(service_name_ptr, *service_name_len_ptr, service_name);
-					  printk("RV; to check service_name=%s, len=%d\n", service_name, (*service_name_len_ptr)+1);  
-					*/
-					
-					struct rbnode_service_name *service_name_node = search_service_blacklist(service_name, (*service_name_len_ptr)+1);
+				if (search_service_len_blacklist((*service_name_len_ptr)+1) != NULL) {									
+					struct rbnode_service_name *service_name_node = search_service_blacklist(iface, (*service_name_len_ptr)+1);
 					if (service_name_node != NULL) {
 						/* service in black or white list */
-						
-						//D(printk("RV; ignored service_name=%s, len=%d\n", service_name, (*service_name_len_ptr)+1));
-						if (service_name_node->is_in_whitelist) {
-							/* entry is in whitelist */
-							
-						} else {
+						if (!service_name_node->is_in_whitelist) {							
 							/* entry is in blacklist */
-							kfree(service_name);	 
+							kfree(iface);	 
 							jprobe_return();
 						}
-					} else if (!is_appuid_monitored && !intercept_all_apps(current->cred->uid)) {
-						kfree(service_name);	 
+					} else if (!is_appuid_monitored && current->cred->uid < lowest_uid_traced) {
+						kfree(iface);	 
 						jprobe_return();
 					}	  	  
-					kfree(service_name);
+					kfree(iface);
 					
-				} else if (!is_appuid_monitored && !intercept_all_apps(current->cred->uid)) {
-					kfree(service_name);	 
+				} else if (!is_appuid_monitored && current->cred->uid < lowest_uid_traced) {
+					kfree(iface);	 
 					jprobe_return();
 				}
 				
 				/*
-				  if (strstr(service_name, "android.app.IActivityManager") != NULL) {
-				  D(printk("RV; serv_name=%s\n", service_name));
+				  if (strstr(iface, "android.app.IActivityManager") != NULL) {
+				  D(printk("RV; serv_name=%s\n", iface));
 				  D(printk("RV; code=%d\n", tr.code));
 				  D(printk("RV; flags=%d\n", tr.flags));
 				  D(printk("RV; sender_pid=%d\n", tr.sender_pid));
@@ -556,9 +546,12 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 				  D(printk("RV; offsets_size=%d\n", tr.offsets_size));
 				  }
 				*/
-				
-				//printk("RV; time=%ld, app_uid=%d, method_id=%d, serv_name=%s", ts.tv_sec, current->cred->uid, tr.code, service_name);
-				D(printk("RV; time=%ld, app_uid=%d, method_id=%d\n", ts.tv_sec, current->cred->uid, tr.code));
+
+				tmp = strrchr(iface, '.');
+				if (tmp && (tmp[1] != '\0'))
+					printk(KERN_INFO "RV; uid=%d, iface=%s, code=%d\n", current->cred->uid, tmp+1, tr.code);
+				else
+					printk(KERN_INFO "RV; uid=%d, iface=%s, code=%d\n", current->cred->uid, iface, tr.code);
 				N(send_event((uint8_t) tr.code,  current->cred->uid, (uint32_t) ts.tv_sec, tr.data_size, tr.data.ptr.buffer, NULL));	  
 				
 #ifdef DEBUG_ON
@@ -624,35 +617,35 @@ static int trace_binder_thread_write(struct binder_proc *proc,
                 },				     \
         }
 
-CREATE_JPROBE(do_execve, trace_do_execve);
+//CREATE_JPROBE(do_execve, trace_do_execve);
 //CREATE_JPROBE(sys_sendto, trace_sys_sendto);
 //CREATE_JPROBE(sys_sendmsg, trace_sys_sendmsg);
 //CREATE_JPROBE(sys_recvmsg, trace_sys_recvmsg);
 //CREATE_JPROBE(do_fork, trace_do_fork);
 //CREATE_JPROBE(sys_read, trace_sys_read);
 //CREATE_JPROBE(sys_write, trace_sys_write);
-CREATE_JPROBE(sys_open, trace_sys_open);
-CREATE_JPROBE(sys_uselib, trace_sys_uselib);
-CREATE_JPROBE(sys_connect, trace_sys_connect);
+//CREATE_JPROBE(sys_open, trace_sys_open);
+//CREATE_JPROBE(sys_uselib, trace_sys_uselib);
+//CREATE_JPROBE(sys_connect, trace_sys_connect);
 CREATE_JPROBE(binder_thread_write, trace_binder_thread_write);
 //CREATE_JPROBE(sys_socket, trace_sys_socket);
 
 
 // Note: prefix of jprobe objects is defined as jp_ in CREATE_JPROBE
-#define NUM_PROBES 5
+#define NUM_PROBES 1
 static struct jprobe *jprobes[NUM_PROBES] = {
-	&jp_do_execve,
+	//&jp_sys_socket
 	//&jp_sys_sendto,
 	//&jp_sys_sendmsg,  
 	//&jp_sys_recvmsg,
 	//&jp_do_fork,
 	//&jp_sys_read,
 	//&jp_sys_write,
-	&jp_sys_open,
-	&jp_sys_connect,
-	&jp_sys_uselib,
+	//&jp_sys_open,
+	//&jp_sys_connect,
+	//&jp_sys_uselib,
+	//&jp_do_execve,
 	&jp_binder_thread_write
-	//&jp_sys_socket
 };
 
 

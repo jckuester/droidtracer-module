@@ -96,14 +96,12 @@ struct rbnode_appuid *search_appuid(uint32_t);
 struct rbnode_services_len *search_service_len_blacklist(uint8_t);
 struct rbnode_service_name *search_service_blacklist(char *, uint8_t);
 int check_if_intercept(uint32_t);
-int intercept_all_apps(uint32_t);
 int droidtracer_register_genl_ops(void);
 
 /* global variables */
 extern uint32_t droidtracer_uid;
 extern uint8_t is_whitelist_empty;
 extern uint8_t appuid_counter;
-extern uint8_t intercept_all_apps_flag;
 extern struct genl_family droidtracer_family;
 
 #endif

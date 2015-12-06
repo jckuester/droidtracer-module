@@ -43,9 +43,10 @@ uint32_t pid = -1;
 uint32_t droidtracer_uid = -1;
 // track every event sent to user space
 uint32_t seq_id = 1;
+extern int lowest_uid_traced;
 
 /* flag that indicates if all apps should be monitored */
-uint8_t intercept_all_apps_flag = false;
+
 uint8_t is_whitelist_empty = true;
 uint8_t appuid_counter = 0;
 
@@ -99,17 +100,9 @@ static struct rb_root rbroot_appuid = RB_ROOT;
  */
 static struct rb_root rbroot_services_blacklist = RB_ROOT;
 
-int intercept_all_apps(uint32_t current_uid) {
-	if (intercept_all_apps_flag && droidtracer_uid != current_uid && current_uid > 10052) 
-		return true;
-	else
-		return false;
-}
-
 int check_if_intercept(uint32_t current_uid) {
-	if ((search_appuid(current_uid) == NULL &&
-			!intercept_all_apps(current_uid)) ||
-		current_uid <= 10052)
+	if (search_appuid(current_uid) == NULL &&
+			lowest_uid_traced >= current_uid)
 		return true;
 	else
 		return false;
@@ -512,7 +505,7 @@ static int cb_set_droidtracer_uid(struct sk_buff *skb_2, struct genl_info *info)
 	  if (uid) {
 		  // set droidtracer uid
 		  droidtracer_uid = uid;
-		  intercept_all_apps_flag = true;    
+		  //intercept_all_apps_flag = true;    
 		  printk("RV; set droidtracer uid=%d.\n", uid);
 	  }   
   } else {
@@ -538,11 +531,11 @@ static int cb_intercept_all_apps(struct sk_buff *skb_2, struct genl_info *info)
 		if (uid) {
 			// set droidtracer uid
 			droidtracer_uid = uid;
-			intercept_all_apps_flag = true;    
+			//intercept_all_apps_flag = true;    
 			printk("RV; intercepting all apps enabled.\n");
 		} else {
 			// if you user sends 0 (instead of real droidtracer uid) means false
-			intercept_all_apps_flag = false;
+			//intercept_all_apps_flag = false;
 			printk("RV; intercepting all apps disabled.\n");
 		}   
 	} else {
@@ -675,13 +668,13 @@ static int insert_service_blacklist(char *service_name, uint8_t service_len, uin
 		else
 			return false;
   }
-	
+
 	/* Add new node and rebalance tree. */
 	data = kzalloc(sizeof(struct rbnode_service_name), GFP_KERNEL);
-	
+
 	if (!data)
-		printk("RV; Error: cannot allocate memory for service_name node=%s", service_name);  
-	
+		printk("RV; Error: cannot allocate memory for service_name node=%s", service_name);
+
 	data->name = service_name;
 	if (is_in_whitelist) {
 		is_whitelist_empty = false;
@@ -697,7 +690,7 @@ static int insert_service_blacklist(char *service_name, uint8_t service_len, uin
 
 static int delete_appuid(uint32_t appuid) {
 	struct rbnode_appuid *data = search_appuid(appuid);
-	
+
 	if (data) {
 		rb_erase(&data->node, &rbroot_appuid);
 		kfree(data);

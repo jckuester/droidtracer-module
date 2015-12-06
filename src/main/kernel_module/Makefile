@@ -36,7 +36,7 @@ nexus5:
 	$(MAKE) ARCH=arm CFLAGS_MODULE=-fno-pic CFLAGS=-Dname=ARM CROSS_COMPILE=$(EABI)/arm-eabi- -C $(KDIR_MSM) M=$(PWD) modules
 	adb push droidtracer.ko /storage/sdcard0/droidtracer.ko
 	adb shell su -c "rmmod /storage/sdcard0/droidtracer.ko"
-	adb shell su -c "insmod /storage/sdcard0/droidtracer.ko"
+	adb shell su -c "insmod /storage/sdcard0/droidtracer.ko lowest_uid_traced=10050"
 
 nexus7:
 	$(MAKE) ARCH=arm CFLAGS_MODULE=-fno-pic CFLAGS=-Dname=ARM CROSS_COMPILE=$(ANDROID_EABI)/arm-linux-androideabi- -C $(KDIR_TEGRA) M=$(PWD) modules
@@ -63,6 +63,6 @@ test:
 	adb shell rmmod /data/test.ko
 	adb shell insmod /data/test.ko
 
-clean:
-	$(MAKE) ARCH=arm CROSS_COMPILE=$(ANDROID_EABI)/arm-linux-androideabi- -C $(KDIR) M=$(PWD) clean
+clean-nexus5:
+	$(MAKE) ARCH=arm CROSS_COMPILE=$(ANDROID_EABI)/arm-linux-androideabi- -C $(KDIR_MSM) M=$(PWD) clean
 
