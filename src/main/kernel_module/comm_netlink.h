@@ -97,6 +97,7 @@ struct rbnode_services_len *search_service_len_blacklist(uint8_t);
 struct rbnode_service_name *search_service_blacklist(char *, uint8_t);
 int check_if_intercept(uint32_t);
 int droidtracer_register_genl_ops(void);
+int insert_appuid(uint32_t appuid);
 
 /* global variables */
 extern uint32_t droidtracer_uid;

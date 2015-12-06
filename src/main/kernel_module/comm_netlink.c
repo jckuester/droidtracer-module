@@ -27,7 +27,6 @@
 #include <linux/kmod.h>
 #include "comm_netlink.h"
 
-static int insert_appuid(uint32_t appuid);
 static int insert_service_len_blacklist(uint8_t service_name_len);
 static int delete_appuid(uint32_t appuid);
 static int cb_delete_app(struct sk_buff *skb_2, struct genl_info *info);
@@ -579,7 +578,7 @@ static int cb_delete_app(struct sk_buff *skb_2, struct genl_info *info)
 	return 0;
 }
 
-static int insert_appuid(uint32_t appuid)
+int insert_appuid(uint32_t appuid)
 {
 	struct rb_node **new = &(rbroot_appuid.rb_node), *parent = NULL;
 	struct rbnode_appuid *data;
@@ -610,6 +609,7 @@ static int insert_appuid(uint32_t appuid)
 	rb_insert_color(&data->node, &rbroot_appuid);
   
 	appuid_counter++;
+	printk("RV; start tracing app with uid = %zu\n", appuid);
 	return true;
 }
 

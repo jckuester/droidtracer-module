@@ -47,10 +47,12 @@ MODULE_DESCRIPTION("Trace Android's Binder and other syscalls via kprobes");
 
 /* if set to value 0, all apps are traced (UID 0 is root) */
 int lowest_uid_traced = INT_MAX;
+static int trace_uids[5] = { -1, -1, -1, -1, -1 };
 
 module_param(lowest_uid_traced, int, 0000);
 MODULE_PARM_DESC(myint, "Trace all UIDs above threshold");
-
+module_param_array(trace_uids, int, NULL, 0000);
+MODULE_PARM_DESC(trace_uids, "Trace this specific UIDs (max. 5 entries)");
 /*
  * removes every second 0 from sequence of uint8_t
  */
@@ -452,7 +454,7 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 	uint32_t cmd;
 	void __user *ptr = buffer + *consumed;
 	void __user *end = buffer + size;
-	uint8_t is_appuid_monitored;
+	uint8_t uid_traced;
 	char *iface;
 	char *tmp;
 	//int i;
@@ -461,15 +463,13 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 	//uint8_t *buffer_tmp;			
 	//uint8_t *buffer_tmp2;			
 
-	is_appuid_monitored = (search_appuid(current->cred->uid) != NULL);
-
-	//printk("RV; lowest_uid=%d", lowest_uid_traced);
+	uid_traced = (search_appuid(current->cred->uid) != NULL);
 
 	/* nerver monitor droidtracer itself 
 	 * OR UIDs under threshold (if UID is not explicitly monitored) */
 	if (current->cred->uid == droidtracer_uid || 
 		(current->cred->uid < lowest_uid_traced && 
-			is_appuid_monitored &&
+			!uid_traced &&
 			is_whitelist_empty))
 		jprobe_return();
 	
@@ -524,13 +524,13 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 							kfree(iface);	 
 							jprobe_return();
 						}
-					} else if (!is_appuid_monitored && current->cred->uid < lowest_uid_traced) {
+					} else if (!uid_traced && current->cred->uid < lowest_uid_traced) {
 						kfree(iface);	 
 						jprobe_return();
 					}	  	  
 					kfree(iface);
 					
-				} else if (!is_appuid_monitored && current->cred->uid < lowest_uid_traced) {
+				} else if (!uid_traced && current->cred->uid < lowest_uid_traced) {
 					kfree(iface);	 
 					jprobe_return();
 				}
@@ -549,7 +549,7 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 
 				tmp = strrchr(iface, '.');
 				if (tmp && (tmp[1] != '\0'))
-					printk(KERN_INFO "RV; uid=%d, iface=%s, code=%d\n", current->cred->uid, tmp+1, tr.code);
+					printk(KERN_INFO "RV; uid = %d, iface = %s, code = %d\n", current->cred->uid, tmp+1, tr.code);
 				else
 					printk(KERN_INFO "RV; uid=%d, iface=%s, code=%d\n", current->cred->uid, iface, tr.code);
 				N(send_event((uint8_t) tr.code,  current->cred->uid, (uint32_t) ts.tv_sec, tr.data_size, tr.data.ptr.buffer, NULL));	  
@@ -651,7 +651,8 @@ static struct jprobe *jprobes[NUM_PROBES] = {
 
 static int __init droidtracer_init(void)
 {
-	int ret; 
+	int ret;
+	int i;
 	
 	/* plant jprobes */  
 	ret = register_jprobes(jprobes, NUM_PROBES);
@@ -674,7 +675,13 @@ static int __init droidtracer_init(void)
 	if (ret < 0)
 		return ret;
 	
-	printk(KERN_INFO "RV; netlink operations registered");  
+	printk(KERN_INFO "RV; netlink operations registered\n");
+
+	/* specific UIDs being traced via module parameter */
+	for (i = 0; i < (sizeof trace_uids / sizeof (int)); i++) {
+		if (trace_uids[i] > 0 )
+			insert_appuid(trace_uids[i]);
+	}
 
 	return 0;
 }
@@ -684,7 +691,7 @@ static void __exit droidtracer_exit(void)
 	unregister_jprobes(jprobes, NUM_PROBES);
 	genl_unregister_family(&droidtracer_family);
 	
-	printk(KERN_INFO "RV; Good bye! Droidtracer module unloaded");  
+	printk(KERN_INFO "RV; Good bye! Droidtracer module unloaded\n");  
 }
 
 module_init(droidtracer_init);
