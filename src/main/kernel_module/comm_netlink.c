@@ -382,27 +382,27 @@ int droidtracer_register_genl_ops(void)
 
 	/* register operations for the family */
 	ret = genl_register_ops(&droidtracer_family, &ops_add_app);
-	if (!ret)
+	if (ret < 0)
 		goto err;
 
 	ret = genl_register_ops(&droidtracer_family, &ops_delete_app);
-	if (!ret)
+	if (ret < 0)
 		goto err;
 
 	ret = genl_register_ops(&droidtracer_family, &ops_add_service_blacklist);
-	if (!ret)
+	if (ret < 0)
 		goto err;
 	
 	ret = genl_register_ops(&droidtracer_family, &ops_add_service_whitelist);
-	if (!ret)
+	if (ret < 0)
 		goto err;
     
 	ret = genl_register_ops(&droidtracer_family, &ops_set_droidtracer_uid);
-	if (!ret)
+	if (ret < 0)
 		goto err;
 
 	ret = genl_register_ops(&droidtracer_family, &ops_intercept_all_apps);
-	if (!ret)
+	if (ret < 0)
 		goto err;
 	
 	return 0;

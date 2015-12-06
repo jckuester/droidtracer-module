@@ -655,7 +655,7 @@ static int __init droidtracer_init(void)
 	
 	/* plant jprobes */  
 	ret = register_jprobes(jprobes, NUM_PROBES);
-	if (!ret) {
+	if (ret < 0) {
 		printk(KERN_ERR "RV; register_jprobes failed = %d\n", ret);
 		return ret;
 	}
@@ -664,15 +664,17 @@ static int __init droidtracer_init(void)
 	/* registers the new family name with the
 	   generic netlink mechanism */
 	ret = genl_register_family(&droidtracer_family);
-	if (!ret) {
+	if (ret < 0) {
 		printk(KERN_ERR "RV; register generic netlink family failed = %d\n", ret);
 		return ret;
 	}
 
 	/* register the netlink operations */
 	ret = droidtracer_register_genl_ops();
-	if (!ret)
+	if (ret < 0)
 		return ret;
+	
+	printk(KERN_INFO "RV; netlink operations registered");  
 
 	return 0;
 }
@@ -681,6 +683,8 @@ static void __exit droidtracer_exit(void)
 {
 	unregister_jprobes(jprobes, NUM_PROBES);
 	genl_unregister_family(&droidtracer_family);
+	
+	printk(KERN_INFO "RV; Good bye! Droidtracer module unloaded");  
 }
 
 module_init(droidtracer_init);
