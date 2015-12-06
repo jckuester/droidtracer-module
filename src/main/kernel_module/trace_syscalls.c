@@ -53,6 +53,11 @@ module_param(lowest_uid_traced, int, 0000);
 MODULE_PARM_DESC(myint, "Trace all UIDs above threshold");
 module_param_array(trace_uids, int, NULL, 0000);
 MODULE_PARM_DESC(trace_uids, "Trace this specific UIDs (max. 5 entries)");
+
+/* global variables */
+static int counter = 0;
+static char iface[100];
+
 /*
  * removes every second 0 from sequence of uint8_t
  */
@@ -455,7 +460,6 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 	void __user *ptr = buffer + *consumed;
 	void __user *end = buffer + size;
 	uint8_t uid_traced;
-	char *iface;
 	char *tmp;
 	//int i;
 	//int j;
@@ -505,14 +509,13 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 				// get time in sec since 1970 (epoch)
 				struct timespec ts;
 				getnstimeofday(&ts);
-				
-				iface = kmalloc((*service_name_len_ptr)+1, GFP_KERNEL);
-				if (!iface) {
-					printk(KERN_WARNING "RV; cannot allocate memory for interface name.\n");
+
+				if ((*service_name_len_ptr) < sizeof(iface)) {
+					binder_data_tostr(service_name_ptr, *service_name_len_ptr, iface);
+				} else {
+					printk(KERN_WARNING "RV; interface name too long");
 					jprobe_return();
 				}
-				binder_data_tostr(service_name_ptr, *service_name_len_ptr, iface);
-				D(printk("RV; interface=%s, len=%d\n", iface, (*service_name_len_ptr)+1));  
 				
 				/* do NOT monitor services in blacklist, but those in whitelist */
 				if (search_service_len_blacklist((*service_name_len_ptr)+1) != NULL) {									
@@ -521,17 +524,13 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 						/* service in black or white list */
 						if (!service_name_node->is_in_whitelist) {							
 							/* entry is in blacklist */
-							kfree(iface);	 
 							jprobe_return();
 						}
 					} else if (!uid_traced && current->cred->uid < lowest_uid_traced) {
-						kfree(iface);	 
 						jprobe_return();
 					}	  	  
-					kfree(iface);
 					
 				} else if (!uid_traced && current->cred->uid < lowest_uid_traced) {
-					kfree(iface);	 
 					jprobe_return();
 				}
 				
@@ -549,7 +548,7 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 
 				tmp = strrchr(iface, '.');
 				if (tmp && (tmp[1] != '\0'))
-					printk(KERN_INFO "RV; uid = %d, iface = %s, code = %d\n", current->cred->uid, tmp+1, tr.code);
+					printk(KERN_INFO "RV; %d, uid = %d, iface = %s, code = %d\n", counter++, current->cred->uid, tmp+1, tr.code);
 				else
 					printk(KERN_INFO "RV; uid=%d, iface=%s, code=%d\n", current->cred->uid, iface, tr.code);
 				N(send_event((uint8_t) tr.code,  current->cred->uid, (uint32_t) ts.tv_sec, tr.data_size, tr.data.ptr.buffer, NULL));	  
