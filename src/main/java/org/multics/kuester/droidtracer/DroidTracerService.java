@@ -437,13 +437,15 @@ public class DroidTracerService extends Service {
 	public native boolean removeServiceFromWhitelist(String service);
 	
 	/**
-	 * Allows intercepting of all apps except droidtracer itself (CAREFUL: could have impact on the performance of your device)
-	 * @param flag 0 (means false) or uid of droidTracer (means true but droidtracer itself is not monitored).
+	 * Intercepting of all apps except (CAREFUL: could have impact on the performance of your device)
+	 * @param uid 0 traces all apps (UID 0 is root)
 	 */
-	private native boolean interceptAllApps(int flag);
+	public native boolean setLowestUidTraced(int uid);
 
+	/*
+	 * tell the kernel module to not trace this service itself
+	 */
     private native boolean setDroidTracerUid(int uid);
-
 
     public void setDroidTracerUid() {
         try {
@@ -453,21 +455,6 @@ public class DroidTracerService extends Service {
             Log.e(logTag, "setDroidTracerUid()", e);
         }
     }
-
-    public boolean interceptAllApps(boolean flag) {
-		try {			
-			if(flag) {
-				// get own (droidtracer service) uid
-				int monitorMeUid = this.getPackageManager().getApplicationInfo("com.monitorme", PackageManager.GET_META_DATA).uid;
-				this.interceptAllApps(monitorMeUid);
-			} else {
-				this.interceptAllApps(0);
-			}
-		} catch (NameNotFoundException e) {
-            Log.e(logTag, "interceptAllApps()", e);
-        }
-		return false;
-	}
 
     public class UnmarshallThread implements Runnable {
 

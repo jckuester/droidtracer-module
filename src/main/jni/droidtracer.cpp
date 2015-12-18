@@ -34,6 +34,7 @@
 #include <signal.h>
 #include <android/log.h>
 
+#include <linux/rbtree.h>
 #include <linux/genetlink.h>
 #include <jni.h>
 
@@ -46,7 +47,7 @@
 #include <map>
 #include <string>
 
-#include <comm_netlink.h>
+#include <genl-endpoint.h>
 
 /* reverse engineered internal android */
 //#include "binder/Parcel.h"
@@ -86,7 +87,7 @@ extern "C" {
   {
     struct nl_msg *msg;
 
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -102,7 +103,7 @@ extern "C" {
   
     // jint is 'signed 32 bits'
     genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family, 0, NLM_F_ECHO,
-		ADD_APP, VERSION_NR);
+		TRACE_APP, VERSION_NR);
   
     nla_put_u32(msg, UID, (uint32_t) uid);
   
@@ -122,7 +123,7 @@ extern "C" {
   {
     struct nl_msg *msg;
 
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -137,7 +138,7 @@ extern "C" {
     msg = nlmsg_alloc();
   
     genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family, 0, NLM_F_ECHO,
-		DELETE_APP, VERSION_NR);
+		UNTRACE_APP, VERSION_NR);
   
     // jint is 'signed 32 bits'
     nla_put_u32(msg, UID, (uint32_t) uid);
@@ -156,7 +157,7 @@ extern "C" {
   {
     struct nl_msg *msg;
     
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -172,7 +173,7 @@ extern "C" {
   
     // jint is 'signed 32 bits'
     genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family, 0, NLM_F_ECHO,
-		ADD_SERVICE_BLACKLIST, VERSION_NR);
+		BLACKLIST_INTERFACE, VERSION_NR);
 
     const char *c_service = env->GetStringUTFChars(service, 0);  
     nla_put_string(msg, SERVICE, c_service);
@@ -192,7 +193,7 @@ extern "C" {
   {
     struct nl_msg *msg;
     
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -208,7 +209,7 @@ extern "C" {
   
     // jint is 'signed 32 bits'
     genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family, 0, NLM_F_ECHO,
-		ADD_SERVICE_WHITELIST, VERSION_NR);
+		WHITELIST_INTERFACE, VERSION_NR);
 
     const char *c_service = env->GetStringUTFChars(service, 0);  
     nla_put_string(msg, SERVICE, c_service);
@@ -224,11 +225,11 @@ extern "C" {
   }
 
  JNIEXPORT jboolean JNICALL  Java_org_multics_kuester_droidtracer_DroidTracerService_setDroidTracerUid(JNIEnv *env,
-										   jobject thiz, jint droidTracerUid)
+										   jobject thiz, jint uid)
   {
     struct nl_msg *msg;
 
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -246,7 +247,7 @@ extern "C" {
 		SET_DROIDTRACER_UID, VERSION_NR);
 
     // jint is 'signed 32 bits'
-    nla_put_u32(msg, UID, (uint32_t) droidTracerUid);
+    nla_put_u32(msg, UID, (uint32_t) uid);
   
     // Send message over netlink socket
     nl_send_auto(sock, msg);
@@ -257,12 +258,12 @@ extern "C" {
     return JNI_TRUE;
   }
 
- JNIEXPORT jboolean JNICALL  Java_org_multics_kuester_droidtracer_DroidTracerService_interceptAllApps(JNIEnv *env,
-										   jobject thiz, jint droidTracerUid)
+ JNIEXPORT jboolean JNICALL  Java_org_multics_kuester_droidtracer_DroidTracerService_setLowestUidTraced(JNIEnv *env,
+										   jobject thiz, jint uid)
   {
     struct nl_msg *msg;
 
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("netlink socket not allocated.");
       return JNI_FALSE;
     }
@@ -277,10 +278,10 @@ extern "C" {
     msg = nlmsg_alloc();
   
     genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family, 0, NLM_F_ECHO,
-		INTERCEPT_ALL_APPS, VERSION_NR);
+		SET_LOWEST_UID_TRACED, VERSION_NR);
 
     // jint is 'signed 32 bits'
-    nla_put_u32(msg, UID, (uint32_t) droidTracerUid);
+    nla_put_u32(msg, UID, (uint32_t) uid);
   
     // Send message over netlink socket
     nl_send_auto(sock, msg);
@@ -294,7 +295,7 @@ extern "C" {
   JNIEXPORT void JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_receiveNetlinkEvents(JNIEnv *env,
 										      jobject obj)
   {
-    if(sock == NULL)
+    if(!sock)
       LOGE("netlink socket not allocated.");
     
     /* wait for new events (no polling, but blocks) */
@@ -309,7 +310,7 @@ extern "C" {
    * E.g., used to connect "onNetlinkEvent" in Java with "on_netlink_event"
    */
   JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_registerCallback(JNIEnv *env,
-										     jobject obj, jstring method, jstring methodSignature)
+												      jobject obj, jstring method, jstring methodSignature)
   {
     env->GetJavaVM(&g_vm);
 
@@ -351,7 +352,8 @@ extern "C" {
   }
   
   /*
-   * gen netlink callback methods. Triggered from kernel module on new events.
+   * gen netlink callback methods. Triggered from kernel module on new
+   * events.
    */
   static int on_netlink_event(struct nl_msg *msg, void *arg)
   {
@@ -469,7 +471,7 @@ extern "C" {
 
     // Allocate a new netlink socket
     sock = nl_socket_alloc();
-    if(sock == NULL) {
+    if(!sock) {
       LOGE("Could not allocate netlink socket.");
       return;
     }
@@ -511,7 +513,7 @@ extern "C" {
      * will be passed on to my_func().
      */
 
-    LOGD("Netlink initialised.");
+    LOGD("Netlink initialised");
   }
 
 #ifdef __cplusplus

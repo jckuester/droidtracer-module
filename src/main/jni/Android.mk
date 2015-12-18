@@ -30,7 +30,7 @@ include $(BUILD_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 # using c++ stl
 APP_STL := stlport_static
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/libnl/include $(LOCAL_PATH)/../kernel_module ~/opt/android-ndk/sources/cxx-stl/gnu-libstdc++/4.7/include
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/libnl/include $(LOCAL_PATH)/../kernel-module ~/opt/android-ndk/sources/cxx-stl/gnu-libstdc++/4.7/include
 LOCAL_MODULE := droidtracer
 LOCAL_STATIC_LIBRARIES := nl
 #LOCAL_LDLIBS := -llog -lbinder -lutils

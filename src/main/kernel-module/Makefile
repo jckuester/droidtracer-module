@@ -21,7 +21,7 @@ ANDROID_EABI_OLD := $(ANDROID_NDK)/toolchains/arm-linux-androideabi-4.4.3/prebui
 EABI := ~/git/arm-eabi-4.7/bin
 
 obj-m += droidtracer.o
-droidtracer-objs := comm_netlink.o trace_syscalls.o
+droidtracer-objs := helper.o genl-endpoint.o trace-syscalls.o
 
 default:
 	$(MAKE) ARCH=arm CFLAGS_MODULE=-fno-pic CFLAGS=-Dname=ARM CROSS_COMPILE=$(ANDROID_EABI)/arm-linux-androideabi- -C $(KDIR) M=$(PWD)  modules
@@ -34,9 +34,9 @@ nexus4:
 
 nexus5:
 	$(MAKE) ARCH=arm CFLAGS_MODULE=-fno-pic CFLAGS=-Dname=ARM CROSS_COMPILE=$(EABI)/arm-eabi- -C $(KDIR_MSM) M=$(PWD) modules
-	adb push droidtracer.ko /storage/sdcard0/droidtracer.ko
 	adb shell su -c "rmmod /storage/sdcard0/droidtracer.ko"
-	adb shell su -c "insmod /storage/sdcard0/droidtracer.ko trace_uids=10074,10084,1000"
+	adb push droidtracer.ko /storage/sdcard0/droidtracer.ko	
+	adb shell su -c "insmod /storage/sdcard0/droidtracer.ko"
 
 nexus7:
 	$(MAKE) ARCH=arm CFLAGS_MODULE=-fno-pic CFLAGS=-Dname=ARM CROSS_COMPILE=$(ANDROID_EABI)/arm-linux-androideabi- -C $(KDIR_TEGRA) M=$(PWD) modules

@@ -23,7 +23,12 @@
 #ifndef TRACE_SYSCALLS_H
 #define TRACE_SYSCALLS_H
 
-// TODO: import struct's below directly from binder.h/binder.c
+#ifndef socklen_t
+typedef u_int32_t socklen_t;
+#endif
+
+/* TODO: possible to import struct's below directly from
+ * binder.h/binder.c? */
 
 enum {
         BINDER_STAT_PROC,
