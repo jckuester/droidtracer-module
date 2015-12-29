@@ -137,8 +137,10 @@ int send_event(uint8_t code, uid_t appuid, uint32_t time, int data_size,
 	 * allocate some memory, since size is not known yet use NLMSG_GOODSIZE
 	 * do not free, genlmsg_unicast takes care, because message can be
 	 * stuck in the queue for a while 
+	 *
+	 * FIXME: GFP_ATOMIC?
 	 */
-	skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
+	skb = genlmsg_new(NLMSG_GOODSIZE, GFP_NOWAIT);
 	if (!skb)
 		goto out;
 	
