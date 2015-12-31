@@ -149,44 +149,46 @@ public class DroidTracerService extends Service {
 		try{
 			if(bb.capacity() > data.length) {
                 // minimize reallocation of memory for 'data'
-				data = new byte[bb.capacity()];
-			}
-			bb.get(data, 0, bb.capacity());
-			UnmarshallThread worker = (UnmarshallThread) unmarhallExecutorService
-					.obtainRunnable();
-			worker.set(syscall, uid, time, code, data, bb.capacity(), readErrorCount);
-			unmarhallExecutorService.execute(worker);
-		} catch (Exception e) {
-			Log.e(logTag, "onNetlink()", e);
-		}
-	}
-	
-	/*
-	 * Start thread to request events from netlink (no polling, but blocks).
-	 */
-	private class ReceiveEventStream extends AsyncTask<Void, Void, Void> {
+                data = new byte[bb.capacity()];
+            }
+            bb.get(data, 0, bb.capacity());
+            UnmarshallThread worker = (UnmarshallThread) unmarhallExecutorService
+                    .obtainRunnable();
+            worker.set(syscall, uid, time, code, data, bb.capacity(), readErrorCount);
+            unmarhallExecutorService.execute(worker);
+        } catch (Exception e) {
+            Log.e(logTag, "onNetlink()", e);
+        }
+    }
 
-		@Override
-		protected Void doInBackground(Void... params) {
-			/* start netlink communication */
-			initNetlink();		
-			
-			// TODO: exception NoSuchMethodError
+    /*
+     * Start thread to request events from netlink (no polling, but blocks).
+     */
+    private class ReceiveEventStream extends AsyncTask<Void, Void, Void> {
 
-			/* link Java onNetlink with on_netlink_event in droidtracer.so */
-			String methodName = "onNetlink";
-			String methodSignature = "(Ljava/lang/String;IIILjava/nio/ByteBuffer;J)V";
-			//String methodSignature = "(Ljava/lang/String;III[B)V";			
-			if (!registerCallback(methodName, methodSignature)) {
-				Log.e(logTag, "Register callback failed: methodName="
-						+ methodName + ", methodSignature=" + methodSignature);			
-			}
-					
-			receiveNetlinkEvents();
-			// return 0L;
-			return null;
-		}
-	}
+        @Override
+        protected Void doInBackground(Void... params) {
+            // TODO: exception NoSuchMethodError
+
+			/* link Java onNetlink() with on_netlink_event()
+		       in droidtracer.so */
+            String methodName = "onNetlink";
+            //String methodSignature = "(Ljava/lang/String;III[B)V";
+            String methodSignature = "(Ljava/lang/String;IIILjava/nio/ByteBuffer;J)V";
+            if (!registerCallback(methodName, methodSignature)) {
+                Log.e(logTag, "Register callback failed: methodName="
+                        + methodName + ", methodSignature=" + methodSignature);
+            } else {
+                Log.i(logTag, "callback registered: methodName="
+                        + methodName + ", methodSignature=" + methodSignature);
+            }
+
+            /* initialize netlink communication,
+               and start receiving events */
+            initNetlink();
+            return null;
+        }
+    }
 
     public void addCodeToMethodNameMapping(String serviceName, int code, String methodName) {
         SparseArray<String> methodNamesArray = methodNames.get(serviceName);
@@ -370,81 +372,68 @@ public class DroidTracerService extends Service {
 
 	/* ###
 	 * NATIVE METHODS
-	 * ### */ 
+	 * ### */
 
-	/**
-	 * Register Java callback method that can be invoked from C++.  
-	 * @param method name of Java callback method to register. 
-	 * @param methodSignature Java callback method signature (e.g., "(III[B)V"). Read JNI documentation on how to specify signature. 
-	 * @return false if method not found.
-	 */
-	private native boolean registerCallback(String method,
-			String methodSignature);
-	
-	/**
-	 * Netlink callback method to request (not yet unmarshalled) low-level system events from kernel module. Note, this method 
-	 * does not poll but blocks, so must be called in thread.
-	 * @see #UnmarshallThread.onEvent(), which provides unmarshalled system events.
-	 */
-	private native void receiveNetlinkEvents();
+    /**
+     * Notify kernel module to start intercepting system events of an app.
+     * Note, system events on blacklist are never monitored.
+     *
+     * @param uid Linux UID, which identifies an app.
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean startInterceptingApp(int uid);
 
-	/**
-	 * Initialize generic netlink communication with the kernel module.
-	 */
-	private native void initNetlink();
+    /**
+     * Notify kernel module to stop intercepting system events of an app.
+     * Note, system events on blacklist are never monitored.
+     *
+     * @param uid Linux UID, which identifies an app.
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean stopInterceptingApp(int uid);
 
-	
-	/**
-	 * Notify kernel module to start intercepting system events of an app. Note, system events on blacklist are never monitored.
-	 * @param uid Linux UID, which identifies an app.
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean startInterceptingApp(int uid);
+    /**
+     * Never intercept any system events of a service.
+     *
+     * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean addServiceToBlacklist(String service);
 
-	/**
-	 * Notify kernel module to stop intercepting system events of an app. Note, system events on blacklist are never monitored.
-	 * @param uid Linux UID, which identifies an app.
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean stopInterceptingApp(int uid);
-	
-	/**
-	 * Never intercept any system events of a service.
-	 * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean addServiceToBlacklist(String service);
-	
-	/**
-	 * Never intercept any system events of a service.
-	 * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean removeServiceFromBlacklist(String service);
-	
-	/**
-	 * Always intercept system events of a service, even for apps that are not monitored.
-	 * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean addServiceToWhitelist(String service);
-	
-	/**
-	 * Always intercept system events of a service (e.g., com.android.internal.telephony.ISms), even for apps that are not monitored.
-	 * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
-	 * @return false if netlink socket not allocated or netlink family not found.
-	 */
-	public native boolean removeServiceFromWhitelist(String service);
-	
-	/**
-	 * Intercepting of all apps except (CAREFUL: could have impact on the performance of your device)
-	 * @param uid 0 traces all apps (UID 0 is root)
-	 */
-	public native boolean setLowestUidTraced(int uid);
+    /**
+     * Never intercept any system events of a service.
+     *
+     * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean removeServiceFromBlacklist(String service);
 
-	/*
-	 * tell the kernel module to not trace this service itself
-	 */
+    /**
+     * Always intercept system events of a service, even for apps that are not monitored.
+     *
+     * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean addServiceToWhitelist(String service);
+
+    /**
+     * Always intercept system events of a service (e.g., com.android.internal.telephony.ISms), even for apps that are not monitored.
+     *
+     * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
+     * @return false if netlink socket not allocated or netlink family not found.
+     */
+    public native boolean removeServiceFromWhitelist(String service);
+
+    /**
+     * Intercepting of all apps except (CAREFUL: could have impact on the performance of your device)
+     *
+     * @param uid 0 traces all apps (UID 0 is root)
+     */
+    public native boolean setLowestUidTraced(int uid);
+
+    /*
+     * tell the kernel module to not trace this service itself
+     */
     private native boolean setDroidTracerUid(int uid);
 
     public void setDroidTracerUid() {
@@ -455,6 +444,25 @@ public class DroidTracerService extends Service {
             Log.e(logTag, "setDroidTracerUid()", e);
         }
     }
+
+    /**
+     * Register Java callback method that can be invoked from C++.
+     *
+     * @param method          name of Java callback method to register.
+     * @param methodSignature Java callback method signature (e.g., "(III[B)V"). Read JNI documentation on how to specify signature.
+     * @return false if method not found.
+     */
+    private native boolean registerCallback(String method, String methodSignature);
+
+    /**
+     * Initialize generic netlink communication with the kernel module.
+     * Note, this method blocks until next, new event is received, so must be called in a thread.
+     * Each new event is handled in a native callback method, which then triggers the callback
+     * method specified via registerCallback()
+     *
+     * @see #UnmarshallThread.onEvent(), which provides unmarshalled system events.
+     */
+    private native boolean initNetlink();
 
     public class UnmarshallThread implements Runnable {
 
