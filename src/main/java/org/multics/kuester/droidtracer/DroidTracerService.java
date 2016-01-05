@@ -431,20 +431,6 @@ public class DroidTracerService extends Service {
      */
     public native boolean setLowestUidTraced(int uid);
 
-    /*
-     * tell the kernel module to not trace this service itself
-     */
-    private native boolean setDroidTracerUid(int uid);
-
-    public void setDroidTracerUid() {
-        try {
-            int monitorMeUid = this.getPackageManager().getApplicationInfo("com.monitorme", PackageManager.GET_META_DATA).uid;
-            this.setDroidTracerUid(monitorMeUid);
-        } catch (NameNotFoundException e) {
-            Log.e(logTag, "setDroidTracerUid()", e);
-        }
-    }
-
     /**
      * Register Java callback method that can be invoked from C++.
      *

@@ -157,7 +157,7 @@ extern "C" {
 		return 0;
 	}
 
-	static jboolean genl_send_int(uint8_t cmd, int value) {
+	static jboolean genl_send_int(uint8_t cmd, uid_t value) {
 		struct nl_msg *msg;
 		struct my_hdr *msg_hdr;
 		
@@ -175,7 +175,7 @@ extern "C" {
 			    family, 0, NLM_F_ECHO, cmd, VERSION_NR);
 		
 		/* jint is 'signed 32 bits' */
-		nla_put_u32(msg, UID, (uint32_t) value);
+		nla_put_u32(msg, UID, value);
 		
 		nl_send_auto(sock, msg);
 		nlmsg_free(msg);
@@ -220,13 +220,6 @@ extern "C" {
 		return genl_send_int(UNTRACE_APP, uid);
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_setDroidTracerUid(JNIEnv *env,
-													     jobject thiz,
-													     jint uid)
-	{
-		return genl_send_int(SET_DROIDTRACER_UID, uid);
-	}
-	
 	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_setLowestUidTraced(JNIEnv *env,
 													      jobject thiz,
 													      jint uid)
@@ -339,6 +332,11 @@ extern "C" {
 			return JNI_FALSE;
 		
 		nl_socket_disable_seq_check(sock);
+
+		/* tell kernel module UID of droidtracer, 
+		   so droidtracer is never traced itself */
+		if(!genl_send_int(SET_DROIDTRACER_UID, getuid()))
+			return JNI_FALSE;
 		
 		LOGI("netlink initialised, start receiving messages");
 
