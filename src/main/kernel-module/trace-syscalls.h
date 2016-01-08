@@ -31,21 +31,21 @@ typedef u_int32_t socklen_t;
  * binder.h/binder.c? */
 
 enum {
-        BINDER_STAT_PROC,
-        BINDER_STAT_THREAD,
-        BINDER_STAT_NODE,
-        BINDER_STAT_REF,
-        BINDER_STAT_DEATH,
-        BINDER_STAT_TRANSACTION,
-        BINDER_STAT_TRANSACTION_COMPLETE,
-        BINDER_STAT_COUNT
+	BINDER_STAT_PROC,
+	BINDER_STAT_THREAD,
+	BINDER_STAT_NODE,
+	BINDER_STAT_REF,
+	BINDER_STAT_DEATH,
+	BINDER_STAT_TRANSACTION,
+	BINDER_STAT_TRANSACTION_COMPLETE,
+	BINDER_STAT_COUNT
 };
 
 struct binder_stats {
-        int br[_IOC_NR(BR_FAILED_REPLY) + 1];
-        int bc[_IOC_NR(BC_DEAD_BINDER_DONE) + 1];
-        int obj_created[BINDER_STAT_COUNT];
-        int obj_deleted[BINDER_STAT_COUNT];
+	int br[_IOC_NR(BR_FAILED_REPLY) + 1];
+	int bc[_IOC_NR(BC_DEAD_BINDER_DONE) + 1];
+	int obj_created[BINDER_STAT_COUNT];
+	int obj_deleted[BINDER_STAT_COUNT];
 };
 
 static struct binder_stats binder_stats;
@@ -63,37 +63,37 @@ struct binder_work {
 };
 
 struct binder_proc {
-        struct hlist_node proc_node;
-        struct rb_root threads;
-        struct rb_root nodes;
-        struct rb_root refs_by_desc;
-        struct rb_root refs_by_node;
-        int pid;
-        struct vm_area_struct *vma;
-        struct task_struct *tsk;
-        struct files_struct *files;
-        struct hlist_node deferred_work_node;
-        int deferred_work;
-        void *buffer;
-        ptrdiff_t user_buffer_offset;
+	struct hlist_node proc_node;
+	struct rb_root threads;
+	struct rb_root nodes;
+	struct rb_root refs_by_desc;
+	struct rb_root refs_by_node;
+	int pid;
+	struct vm_area_struct *vma;
+	struct task_struct *tsk;
+	struct files_struct *files;
+	struct hlist_node deferred_work_node;
+	int deferred_work;
+	void *buffer;
+	ptrdiff_t user_buffer_offset;
 
-        struct list_head buffers;
-        struct rb_root free_buffers;
-        struct rb_root allocated_buffers;
-        size_t free_async_space;
+	struct list_head buffers;
+	struct rb_root free_buffers;
+	struct rb_root allocated_buffers;
+	size_t free_async_space;
 
-        struct page **pages;
-        size_t buffer_size;
-        uint32_t buffer_free;
-        struct list_head todo;
-        wait_queue_head_t wait;
-        struct binder_stats stats;
-        struct list_head delivered_death;
+	struct page **pages;
+	size_t buffer_size;
+	uint32_t buffer_free;
+	struct list_head todo;
+	wait_queue_head_t wait;
+	struct binder_stats stats;
+	struct list_head delivered_death;
 	int max_threads;
-        int requested_threads;
-        int requested_threads_started;
-        int ready_threads;
-        long default_priority;
+	int requested_threads;
+	int requested_threads_started;
+	int ready_threads;
+	long default_priority;
 };
 
 struct binder_thread {
@@ -121,7 +121,7 @@ struct binder_transaction {
 	struct binder_transaction *to_parent;
 	unsigned need_reply : 1;
 	/*unsigned is_dead : 1;*/ /* not used at the moment */
-	
+
 	struct binder_buffer *buffer;
 	unsigned int    code;
 	unsigned int    flags;
@@ -138,9 +138,9 @@ struct binder_buffer {
 	unsigned allow_user_free : 1;
 	unsigned async_transaction : 1;
 	unsigned debug_id : 29;
-	
+
 	struct binder_transaction *transaction;
-	
+
 	struct binder_node *target_node;
 	size_t data_size;
 	size_t offsets_size;

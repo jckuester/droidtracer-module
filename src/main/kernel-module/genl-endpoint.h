@@ -31,7 +31,7 @@
 #ifdef DEBUG_ON
 #  define D(x) x
 #else
-#  define D(x) 
+#  define D(x)
 #endif
 
 #ifdef NETLINK_ON
@@ -40,7 +40,10 @@
 #  define N(x)
 #endif
 
-/* 
+#define FAMILY_NAME "DROIDTRACER"
+#define VERSION_NR 1
+
+/*
  * attributes (variables): the index in this enum is used as a
  * reference for the type, userspace application has to indicate the
  * corresponding type the policy is used for security considerations
@@ -48,7 +51,7 @@
 enum {
 	ATTR_UNSPEC,
 	/* UID of an app */
-	UID,  
+	UID,
 	/* Unix time stamp when an event is intercepted in the kernel */
 	TIME,
 	/* encoded Android API method name in binder_tranaction_data */
@@ -61,23 +64,24 @@ enum {
 };
 #define ATTR_MAX (__ATTR_MAX - 1)
 
-/* 
- * commands: enumeration of all commands (functions), 
+/*
+ * commands: enumeration of all commands (functions),
  * used by userspace application to identify command to be ececuted
  */
 enum {
 	CMD_UNSPEC,
 	TRACE_APP,
 	UNTRACE_APP,
-	BLACKLIST_INTERFACE,
-	WHITELIST_INTERFACE,
+	ADD_BLACKLIST_INTERFACE,
+	REMOVE_BLACKLIST_INTERFACE,
+	ADD_WHITELIST_INTERFACE,
+	REMOVE_WHITELIST_INTERFACE,
 	SET_DROIDTRACER_UID,
 	SET_LOWEST_UID_TRACED,
 	__CMD_MAX,
 };
 #define CMD_MAX (__CMD_MAX - 1)
 
-#define VERSION_NR 1
 
 /* function declarations */
 int send_event(uint8_t code, uid_t appuid, uint32_t time, int data_size,

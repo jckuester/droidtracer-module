@@ -1,23 +1,23 @@
 /*********************************************************************
- *  This is part of DroidTracer
- *  (http://kuester.multics.org/DroidTracer).
- *
- *  Copyright (c) 2013-2015 by Jan-Christoph Küster
- *  <jckuester@gmail.com>
- *
- *  DroidTracer is free software: you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License as
- *  published by the Free Software Foundation, either version 2 of the
- *  License, or (at your option) any later version.
- *
- *  DroidTracer is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- *  General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with DroidTracer.  If not, see
- *  <http://www.gnu.org/licenses/>.
+ * This is part of DroidTracer
+ * (http://kuester.multics.org/DroidTracer).
+ * <p/>
+ * Copyright (c) 2013-2015 by Jan-Christoph Küster
+ * <jckuester@gmail.com>
+ * <p/>
+ * DroidTracer is free software: you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, either version 2 of the
+ * License, or (at your option) any later version.
+ * <p/>
+ * DroidTracer is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ * <p/>
+ * You should have received a copy of the GNU General Public License
+ * along with DroidTracer. If not, see
+ * <http://www.gnu.org/licenses/>.
  ********************************************************************/
 
 package org.multics.kuester.droidtracer;
@@ -55,99 +55,284 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
-/*
- * TODO extend IntentService; is used to perform a certain task in the background. 
- * Once done, the instance of IntentService terminate itself automatically
- */
-
 /**
- * Implement your analysis in onEvent().
- * 
  * @author Jan-Christoph Kuester
- * @version 0.1
  *
+ * TODO extend IntentService; is used to perform a certain task in the background.
+ * Once done, the instance of IntentService terminate itself automatically
  */
 public class DroidTracerService extends Service {
 
     // 0) LOGGING OFF, 1) ERROR, 2) INFO, 3) DEBUG
-	private static final int LOGLEVEL = 0;
+    private static final int LOGLEVEL = 0;
 
     public static final boolean ERROR = LOGLEVEL > 0;
     public static final boolean INFO = LOGLEVEL > 1;
-	public static final boolean DEBUG = LOGLEVEL > 2;
+    public static final boolean DEBUG = LOGLEVEL > 2;
 
-	public static byte[] data = new byte[120];
-	
-	// TODO use newSingleThreadScheduledExecutor 
-	//private final ExecutorService unmarhallExecutorService = Executors.newFixedThreadPool(1);
-	private final SingleThreadPoolExecutor unmarhallExecutorService = new SingleThreadPoolExecutor(1); 
-	
-	static {
-		/* load shared C++ JNI library
-		 *  @see jni/libdroidtracer.so */
-		System.loadLibrary("droidtracer");
-	}
+    public static byte[] data = new byte[120];
 
-	private static String logTag = "RV; DroidTracerService.java";
-		
-	private final IBinder mBinder = new LocalBinder();
-	
-	// store method-signatures
-	private Map<String, SparseArray<String>> methodNames = new HashMap<String, SparseArray<String>>();
-	private Map<String, SparseArray<String[]>> methodSignatures = new HashMap<String, SparseArray<String[]>>();
+    // TODO use newSingleThreadScheduledExecutor
+    //private final ExecutorService unmarhallExecutorService = Executors.newFixedThreadPool(1);
+    private final SingleThreadPoolExecutor unmarhallExecutorService = new SingleThreadPoolExecutor(1);
 
+    static {
+    /* load shared C++ JNI library
+         *  @see jni/libdroidtracer.so */
+        System.loadLibrary("droidtracer");
+    }
+
+    private static String logTag = "RV; DroidTracerService.java";
+
+    private final IBinder mBinder = new LocalBinder();
+
+    // store method-signatures
+    private Map<String, SparseArray<String>> methodNames = new HashMap<String, SparseArray<String>>();
+    private Map<String, SparseArray<String[]>> methodSignatures = new HashMap<String, SparseArray<String[]>>();
+
+    private ReceiveEventStream bla = new ReceiveEventStream();
     protected OnEventCallback callback;
 
-	@Override
-	public void onCreate() {		
-		// run netlink communication in different thread
-		new ReceiveEventStream().execute();
-	}
+    @Override
+    public void onCreate() {
+        Log.i(logTag,"run netlink communication in different thread: " + bla.isCancelled());
+        // run netlink communication in different thread
+        bla.execute();
+    }
+
+    @Override
+    public void onDestroy() {
+        Log.i(logTag, "destroyed");
+        bla.cancel(true);
+    }
 
     public void registerOnEventListener(OnEventCallback callback) {
         this.callback = callback;
     }
 
-	@Override
-	public int onStartCommand(Intent intent, int flags, int startId) {		
-		// We want this service to continue running until it is explicitly
-		// stopped, so return sticky.		
-		startForeground(1, new Notification());		
-		return Service.START_NOT_STICKY;
-	}
-	
-	/*
-	 * (non-Javadoc)
-	 * 
-	 * @see android.app.Service#onBind(android.content.Intent)
-	 */
-	@Override
-	public IBinder onBind(Intent intent) {		
-		// TODO for communication return IBinder implementation
-		return mBinder;
-	}
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        // We want this service to continue running until it is explicitly
+        // stopped, so return sticky.
+        startForeground(1, new Notification());
+        return Service.START_NOT_STICKY;
+    }
 
-	/*
-	 * Class for clients to access. Because we know this service always runs in
-	 * the same process as its clients, we don't need to deal with IPC.
-	 * 
-	 * http://developer.android.com/reference/android/app/Service.html#
-	 * LocalServiceSample
-	 */
-	public class LocalBinder extends Binder {
-		public DroidTracerService getService() {
-			return DroidTracerService.this;
-		}
-	}
-	
-	/*
-	 * delegates events to either onNetlinkSyscall or onNetlinkBinder
-	 * note: this method is only called from native library
-	 */
-	private void onNetlink(String syscall, int uid, int time, int code, ByteBuffer bb, long readErrorCount) {
-	//private void onNetlink(String syscall, int uid, int time, int code, byte[] data) {		
-		try{
-			if(bb.capacity() > data.length) {
+    /*
+     * (non-Javadoc)
+     *
+     * @see android.app.Service#onBind(android.content.Intent)
+     */
+    @Override
+    public IBinder onBind(Intent intent) {
+        // TODO for communication return IBinder implementation
+        return mBinder;
+    }
+
+    /*
+     * Class for clients to access. Because we know this service always runs in
+     * the same process as its clients, we don't need to deal with IPC.
+     *
+     * http://developer.android.com/reference/android/app/Service.html#
+     * LocalServiceSample
+     */
+    public class LocalBinder extends Binder {
+        public DroidTracerService getService() {
+            return DroidTracerService.this;
+        }
+    }
+
+    /* ###
+     * NATIVE METHODS
+     * ### */
+
+    /**
+     * Starts tracing behaviour of an app.
+     * <p/>
+     * Apps are not modified and treated as black boxes, so "only" information flow that leaves
+     * an app's sandbox can be traced, i.e., Binder transactions, and system calls performed.
+     * More precisely, remote method calls to system services of the Android platform, or other
+     * services defined via AIDL, including intents or broadcasts (also handled via Binder)
+     * that are used to start or send data to other apps or services.
+     * Additionally, a bunch of system calls are intercepted, e.g., sys_open, or sys_connect,
+     * which are triggered when a file is opened or an app connects to the internet, respectively.
+     * <p/>
+     * Logging takes place in the underlying Linux OS, so this method notifies the kernel module
+     * to start intercepting an app.
+     * Note that blacklisted behaviour via {@link #addInterfaceToBlacklist} is never traced.
+     * For each event captured, the callback method registered via
+     * {@link #registerOnEventListener} is triggered.
+     *
+     * @param uid the Linux UID that uniquely identifies an app
+     * @return <tt>true</tt> if notifying the kernel module to start tracing was successful
+     */
+    public native boolean startTracingApp(int uid);
+
+    /**
+     * Stops logging behaviour of an app.
+     *
+     * @param uid the Linux UID that uniquely identifies an app
+     * @return <tt>true</tt> if notifying the kernel module to stop tracing was successful
+     */
+    public native boolean stopTracingApp(int uid);
+
+    /**
+     * Blacklist an interface, so Binder transactions to the respective service are never traced.
+     * <p/>
+     * Some examples for interface names representing system services of the Android platform are:
+     * com.android.internal.telephony.ISms
+     * android.view.IWindowSession
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @return <tt>true</tt> if notifying the kernel module about this action was successful
+     */
+    public native boolean addInterfaceToBlacklist(String interfaceName);
+
+    /**
+     * Remove an interface from blacklist.
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @return <tt>true</tt> if notifying the kernel module about this action was successful
+     */
+    public native boolean removeInterfaceFromBlacklist(String interfaceName);
+
+    /**
+     * Whitelist an interface, so Binder transactions to the respective service are always traced.
+     * <p/>
+     * Transaction of a whitelisted service are even traced for apps not monitored via
+     * {@link #startTracingApp}.
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @return <tt>true</tt> if notifying the kernel module about this action was successful
+     */
+    public native boolean addInterfaceToWhitelist(String interfaceName);
+
+    /**
+     * Remove an interface from whitelist.
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @return <tt>true</tt> if notifying the kernel module about this action was successful
+     */
+    public native boolean removeInterfaceFromWhitelist(String interfaceName);
+
+    /**
+     * Trace all apps with an equal or higher UID.
+     * <p/>
+     * If UID set to 0 all apps are traced (0 is the UID of root)
+     * CAREFUL: could have impact on the performance of your device.
+     *
+     * @param uid the Linux UID and all above are traced
+     * @return <tt>true</tt> if notifying the kernel module about this action was successful
+     */
+    public native boolean setLowestUidTraced(int uid);
+
+    /**
+     * Register Java callback method that can be invoked from C++.
+     *
+     * @param method the name of Java callback method to register
+     * @param methodSignature the Java callback method signature (e.g., "(III[B)V")
+     * @return <tt>true</tt> if registering was successful
+     */
+    private native boolean registerCallback(String method, String methodSignature);
+
+    /**
+     * Initializes generic netlink communication with the kernel module.
+     * <p/>
+     * Note, this method blocks until next, new event is received, so must be called in a thread.
+     * Each new event is handled in a native callback method, which then triggers the callback
+     * method specified via {@link #registerOnEventListener}
+     */
+    private native boolean initNetlink();
+
+    /* ###
+     * KERNEL METHODS
+     * ### */
+
+    /**
+     * Checks if the kernel is configured with kprobes.
+     *
+     * @return <tt>true</tt> if the Linux kernel has kprobes enabled
+     */
+    public static boolean hasKernelKprobesEnabled() {
+        return executeCommand("sh", "-c", "cat /proc/kallsyms | grep ' register_jprobes$'");
+    }
+
+    /**
+     * Checks if the droidtracer kernel module is loaded.
+     *
+     * @return <tt>true</tt> if the kernel module is loaded
+     */
+    public static boolean isKernelModuleLoaded() {
+        return executeCommand("sh", "-c", "lsmod | grep droidtracer");
+    }
+
+    /**
+     * Loads the droidtracer kernel module.
+     */
+    public static void loadKernelModule() {
+        executeCommand("su", "-c", "insmod /sdcard/com.monitorme/droidtracer.ko");
+    }
+
+    /**
+     * Unloads the droidtracer kernel module.
+     */
+    public static void unloadKernelModule() {
+        executeCommand("su", "-c", "rmmod droidtracer.ko");
+    }
+
+    // TODO boot image is for my device hardcoded
+    public static void flashKprobesKernel() {
+        executeCommand("su", "-c", "dd if='/sdcard/com.monitorme/boot_nexus5_LMY48B_kprobes.img'",
+                "of='/dev/block/platform/msm_sdcc.1/by-name/boot'");
+    }
+
+    // TODO boot image is for my device hardcoded
+    public static void flashStockKernel() {
+        executeCommand("su", "-c", "dd if='/sdcard/com.monitorme/my_nexus5_LMY48B_boot.img'",
+                "of='/dev/block/platform/msm_sdcc.1/by-name/boot'");
+    }
+
+    /**
+     * Reboots the device.
+     */
+    public static void reboot() {
+        executeCommand("su", "-c", "reboot");
+    }
+
+    private static boolean executeCommand(String... command) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder()
+                    .command(Arrays.asList(command))
+                    .redirectErrorStream(true)
+                    .start();
+
+            BufferedReader bufferedReader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()));
+
+            String line;
+            while ((line = bufferedReader.readLine()) != null) {
+                if (line.length() > 0)
+                    return true;
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (process != null)
+                process.destroy();
+        }
+        return false;
+    }
+
+    /*
+     * delegates events to either onNetlinkSyscall or onNetlinkBinder
+     * note: this method is only called from native library
+     */
+    private void onNetlink(String syscall, int uid, int time, int code, ByteBuffer bb, long readErrorCount) {
+        //private void onNetlink(String syscall, int uid, int time, int code, byte[] data) {
+        try {
+            if (bb.capacity() > data.length) {
                 // minimize reallocation of memory for 'data'
                 data = new byte[bb.capacity()];
             }
@@ -203,252 +388,12 @@ public class DroidTracerService extends Service {
     public void addMethodSignatureMapping(String serviceName, int code, String[] paramTypes) {
         SparseArray<String[]> methodSignaturesArray = methodSignatures.get(serviceName);
 
-        if(methodSignaturesArray == null) {
+        if (methodSignaturesArray == null) {
             methodSignaturesArray = new SparseArray<String[]>();
             methodSignatures.put(serviceName, methodSignaturesArray);
         }
         methodSignaturesArray.put(code, paramTypes);
     }
-
-	/* ###
-	 * KERNEL METHODS
-	 * ### */
-
-	public static boolean hasKernelKprobesEnabled() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("sh", "-c", "cat /proc/kallsyms | grep ' register_jprobes$'")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(line.length() > 0) return true;
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-		return false;
-	}
-
-	public static boolean isKernelModuleLoaded() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("sh", "-c", "lsmod | grep droidtracer")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(line.length() > 0) return true;
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-		return false;
-	}
-
-	public static void loadKernelModule() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("su", "-c", "insmod /sdcard/com.monitorme/droidtracer.ko")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(DroidTracerService.DEBUG) Log.d(logTag, line);
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-	}
-
-	public static void unloadKernelModule() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("su", "-c", "rmmod droidtracer.ko")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(DroidTracerService.DEBUG) Log.d(logTag, line);
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-	}
-
-	// TODO boot image is for my device hardcoded
-	public static void flashKprobesKernel() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("su", "-c", "dd if='/sdcard/com.monitorme/boot_nexus5_LMY48B_kprobes.img'",
-							"of='/dev/block/platform/msm_sdcc.1/by-name/boot'")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(DroidTracerService.DEBUG) Log.d(logTag, line);
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-	}
-
-	// TODO boot image is for my device hardcoded
-	public static void flashStockKernel() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("su", "-c", "dd if='/sdcard/com.monitorme/my_nexus5_LMY48B_boot.img'",
-							"of='/dev/block/platform/msm_sdcc.1/by-name/boot'")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(DroidTracerService.DEBUG) Log.d(logTag, line);
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-	}
-
-	public static void reboot() {
-		Process process = null;
-		try {
-			process = new ProcessBuilder()
-					.command("su", "-c", "reboot")
-					.redirectErrorStream(true)
-					.start();
-
-			BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			String line;
-			while((line = bufferedReader.readLine()) != null){
-				if(DroidTracerService.DEBUG) Log.d(logTag, line);
-			}
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			if(process != null) process.destroy();
-		}
-	}
-
-	/* ###
-	 * NATIVE METHODS
-	 * ### */
-
-    /**
-     * Notify kernel module to start intercepting system events of an app.
-     * Note, system events on blacklist are never monitored.
-     *
-     * @param uid Linux UID, which identifies an app.
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean startInterceptingApp(int uid);
-
-    /**
-     * Notify kernel module to stop intercepting system events of an app.
-     * Note, system events on blacklist are never monitored.
-     *
-     * @param uid Linux UID, which identifies an app.
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean stopInterceptingApp(int uid);
-
-    /**
-     * Never intercept any system events of a service.
-     *
-     * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean addServiceToBlacklist(String service);
-
-    /**
-     * Never intercept any system events of a service.
-     *
-     * @param service interface, which identifies a service (e.g., android.view.IWindowSession).
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean removeServiceFromBlacklist(String service);
-
-    /**
-     * Always intercept system events of a service, even for apps that are not monitored.
-     *
-     * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean addServiceToWhitelist(String service);
-
-    /**
-     * Always intercept system events of a service (e.g., com.android.internal.telephony.ISms), even for apps that are not monitored.
-     *
-     * @param service interface, which identifies a service (e.g., com.android.internal.telephony.ISms).
-     * @return false if netlink socket not allocated or netlink family not found.
-     */
-    public native boolean removeServiceFromWhitelist(String service);
-
-    /**
-     * Intercepting of all apps except (CAREFUL: could have impact on the performance of your device)
-     *
-     * @param uid 0 traces all apps (UID 0 is root)
-     */
-    public native boolean setLowestUidTraced(int uid);
-
-    /**
-     * Register Java callback method that can be invoked from C++.
-     *
-     * @param method          name of Java callback method to register.
-     * @param methodSignature Java callback method signature (e.g., "(III[B)V"). Read JNI documentation on how to specify signature.
-     * @return false if method not found.
-     */
-    private native boolean registerCallback(String method, String methodSignature);
-
-    /**
-     * Initialize generic netlink communication with the kernel module.
-     * Note, this method blocks until next, new event is received, so must be called in a thread.
-     * Each new event is handled in a native callback method, which then triggers the callback
-     * method specified via registerCallback()
-     *
-     * @see #UnmarshallThread.onEvent(), which provides unmarshalled system events.
-     */
-    private native boolean initNetlink();
 
     public class UnmarshallThread implements Runnable {
 

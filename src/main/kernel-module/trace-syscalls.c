@@ -87,17 +87,17 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 	uint8_t *iface_ptr;
 	struct timespec ts;
 	struct binder_transaction_data tr;
-	
+
 	uid_traced = (get_appuid(current->cred->uid) != NULL);
 
-	/* nerver monitor droidtracer itself 
+	/* nerver monitor droidtracer itself
 	 * OR UIDs under threshold (if UID is not explicitly monitored) */
-	if (current->cred->uid == droidtracer_uid || 
-		(current->cred->uid < lowest_uid_traced && 
+	if (current->cred->uid == droidtracer_uid ||
+		(current->cred->uid < lowest_uid_traced &&
 			!uid_traced &&
 			whitelist_empty))
 		jprobe_return();
-	
+
 	while (ptr < end && thread->return_error == BR_OK) {
 		if (get_user(cmd, (uint32_t __user *)ptr))
 			//return -EFAULT;
@@ -111,40 +111,40 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 
 		if (cmd != BC_TRANSACTION)  // || cmd == BC_REPLY
 			jprobe_return();
-		
+
 		/* handle (target method Remote Interface)
-		 * sender_pid/euid is not copied from user space 
+		 * sender_pid/euid is not copied from user space
 		 * code (method ID)
 		 * data.ptr.buffer (Parcel - Input/Output Parameters)
-		 */         
-		
+		 */
+
 		if (copy_from_user(&tr, ptr, sizeof(tr)))
 			//return -EFAULT;
 			jprobe_return();
-		
-		
+
+
 		if (tr.data_size < 4) {
 			printk(KERN_WARNING
 				"RV; untraced BC_TRANSACTION, data_size = %d\n",
 				tr.data_size);
 			jprobe_return();
 		}
-		
+
 		data_ptr = (uint8_t *) tr.data.ptr.buffer;
 		iface_len = *(data_ptr + 4);
 		iface_ptr = (uint8_t *) data_ptr + 8;
-		
+
 		/* get time in sec since 1970 (epoch) */
 		getnstimeofday(&ts);
-		
+
 		if (iface_len < sizeof(interface)) {
 			binder_data_tostr(iface_ptr, iface_len, interface);
 		} else {
 			printk(KERN_WARNING "RV; interface name too long");
 			jprobe_return();
 		}
-		
-		/* DON'T trace interfaces in blacklist 
+
+		/* DON'T trace interfaces in blacklist
 		   but those in whitelist */
 		if (get_blacklisted_iface_len(iface_len+1)) {
 			struct rbnode_interface *iface_node =
@@ -157,12 +157,12 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 				}
 				/* in whitelist, so continue tracing */
 				goto continue_tracing;
-			}			
-		}		
+			}
+		}
 		if (!uid_traced && current->cred->uid < lowest_uid_traced)
-			jprobe_return();		
-		
-	continue_tracing:		
+			jprobe_return();
+
+	continue_tracing:
 		/*
 		  if (strstr(iface, "android.app.IActivityManager")) {
 		  D(printk("RV; serv_name=%s\n", iface));
@@ -175,7 +175,7 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 		  }
 		*/
 
-		tmp = strrchr(interface, '.');			
+		tmp = strrchr(interface, '.');
 		if (tmp && (tmp[1] != '\0'))
 			D(printk(KERN_INFO
 					"RV; %d, uid: %d, %s, code: %d, size: %d\n",
@@ -186,30 +186,30 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 					"RV; %d, uid: %d, %s, code: %d\n, size: %d",
 					counter++, current->cred->uid, interface, tr.code,
 					tr.data_size));
-		
+
 		N(send_event(tr.code,  current->cred->uid, ts.tv_sec,
 				tr.data_size, tr.data.ptr.buffer, NULL));
-		
+
 		D(print_debug(tr, data_ptr));
 	}
-	
+
 	/* Always end with a call to jprobe_return(). */
 	jprobe_return();
 	/* NEVER REACHED */
-	return 0; 
+	return 0;
 }
 
 asmlinkage long trace_sys_open(const char __user *filename, int flags, int mode)
-{  
-	char *tmp;  
+{
+	char *tmp;
 	int ret;
 	struct timespec ts;
 
-	if (!intercept(current->cred->uid)) 
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	printk("RV; sys_open; uid=%d\n", current->cred->uid);
-	
+
 	tmp = __getname();
 	//tmp = kmalloc(PATH_MAX + 1, GFP_KERNEL);
 	ret = strncpy_from_user(tmp, filename, PATH_MAX + 1);
@@ -217,22 +217,22 @@ asmlinkage long trace_sys_open(const char __user *filename, int flags, int mode)
 		putname(tmp);
 		jprobe_return();
 	}
-	
+
 	if (!strstr(tmp, "/system/") && !strstr(tmp, "/proc/")) {
 		//if (strstr(tmp, "sdcard") || strstr(tmp, "/storage/emulated")) {
 		// get time in sec since 1970 (epoch)
 		getnstimeofday(&ts);
-		
+
 		N(send_event(0, current->cred->uid, (uint32_t) ts.tv_sec,
-				strlen(tmp), tmp, "sys_open"));	  
+				strlen(tmp), tmp, "sys_open"));
 		printk("RV; sys_open; uid=%d, file=%s, flags=0x%x, mode=0o%03o\n",
 			(current->cred)->uid, tmp, flags, mode);
 	}
-	
+
 	putname(tmp);
 	//kfree(tmp);
 	jprobe_return();
-	return 0;  
+	return 0;
 }
 
 long trace_sys_connect(int sockfd, const struct sockaddr *addr,
@@ -241,28 +241,28 @@ long trace_sys_connect(int sockfd, const struct sockaddr *addr,
 	struct timespec ts;
 	struct sockaddr_in *ipv4;
 	struct sockaddr_in6 *ipv6;
-	
-	/* only monitor apps in list apps_uid_to_monitor */  
-	if (!intercept(current->cred->uid)) 
+
+	/* only monitor apps in list apps_uid_to_monitor */
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	printk("RV; sys_connect; uid=%d\n", current->cred->uid);
-	
+
 	getnstimeofday(&ts);
- 
+
 	if (addr->sa_family == AF_INET) {
 		ipv4 = (struct sockaddr_in *) addr;
 		D(printk("RV; sys_connect, ipv4; ip = %pI4, uid = %d\n",
 				&ipv4->sin_addr.s_addr, current->cred->uid);)
 			N(send_event(0, current->cred->uid, ts.tv_sec,
-					sizeof(unsigned long), &ipv4->sin_addr.s_addr, "sys_connect"));	  
+					sizeof(unsigned long), &ipv4->sin_addr.s_addr, "sys_connect"));
 	} else if (addr->sa_family == AF_INET6) {
 		// u_int8_t  s6_addr[16]; 128 bit
 		ipv6 = (struct sockaddr_in6 *) addr;
 		D(printk("RV; sys_connect, ipv6; ip = %pI6, uid = %d\n",
 				(ipv6->sin6_addr).s6_addr, current->cred->uid);)
 			N(send_event(0, current->cred->uid, (uint32_t) ts.tv_sec,
-					16, (uint8_t *) (ipv6->sin6_addr).s6_addr, "sys_connect"));	  
+					16, (uint8_t *) (ipv6->sin6_addr).s6_addr, "sys_connect"));
 	} else {
 		/*
 		  p = current;
@@ -272,7 +272,7 @@ long trace_sys_connect(int sockfd, const struct sockaddr *addr,
 		  p->pid, (p->cred)->uid, (p->cred)->euid));
 		*/
 	}
-	
+
   jprobe_return();
   return 0;
 }
@@ -285,19 +285,19 @@ long handle_read_write(unsigned int fd, const char __user *buf,
 		size_t count, bool write)
 {
 	struct timespec ts;
-	char *buf_tmp;  
+	char *buf_tmp;
 	//int i;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor */
-	if (!intercept(current->cred->uid)) 
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
-	// buf  
+
+	// buf
 	buf_tmp = kmalloc(count, GFP_KERNEL);
 	if (copy_from_user(buf_tmp, buf, count))
 		goto out;
 	getnstimeofday(&ts);
-	
+
 	if (write) {
 		D(printk("RV; sys_write; uid = %d, fd = %d, count = %zd, buf=",
 				current->cred->uid, fd, count));
@@ -309,13 +309,13 @@ long handle_read_write(unsigned int fd, const char __user *buf,
 		N(send_event(0, current->cred->uid, (uint32_t) ts.tv_sec,
 				count, buf_tmp, "do_read"));
 	}
-	
+
 #ifdef DEBUG_ON
 	for (i = 0; i < count; i++)
 		printk("%c", buf_tmp[i]);
 	printk("\n");
 #endif
-	
+
  out:
 	kfree(buf_tmp);
 	jprobe_return();
@@ -325,7 +325,7 @@ long handle_read_write(unsigned int fd, const char __user *buf,
 // TODO: do_read instead of sys_read?
 long trace_sys_read(unsigned int fd, char __user *buf, size_t count)
 {
-	return handle_read_write(fd, buf, count, false);  
+	return handle_read_write(fd, buf, count, false);
 }
 
 // TODO: do_read instead of sys_write?
@@ -335,33 +335,33 @@ long trace_sys_write(unsigned int fd, const char __user *buf, size_t count)
 }
 
 /**
- * sys_send - only when the socket is in a connected state; calls sys_sendto 
+ * sys_send - only when the socket is in a connected state; calls sys_sendto
  * with NUL address in net/socket.c
  * Also sys_send is equivalent to write, just different flags
  * sys_sendto - is for UDP, destination specified each time
  * sys_sendmsg - the only necessary cal; send and sendto are just a wrapper
  */
-//long sys_send(int, void __user *, size_t, unsigned) 
+//long sys_send(int, void __user *, size_t, unsigned)
 
 asmlinkage long trace_sys_sendto(int fd, void __user *buff, size_t len,
 				unsigned flags, struct sockaddr __user *addr,
 				int addr_len)
 {
 	struct timespec ts;
-	char *buff_tmp;  
+	char *buff_tmp;
 	int i;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor  */
-	if (!intercept(current->cred->uid)) 
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	printk("RV; sys_sendto; uid = %d\n", current->cred->uid);
-	
+
 	buff_tmp = kmalloc(len, GFP_KERNEL);
 	if (copy_from_user(buff_tmp, buff, len))
 		goto out;
 	getnstimeofday(&ts);
-	
+
 	//#ifdef DEBUG_ON
 	printk("RV; sys_sendto; uid = %d, fd = %d, len = %zd, buff=",
 		current->cred->uid, fd, len);
@@ -369,10 +369,10 @@ asmlinkage long trace_sys_sendto(int fd, void __user *buff, size_t len,
 		printk("%c", buff_tmp[i]);
 	printk("\n");
 	//#endif
-	
+
 	N(send_event(0,  current->cred->uid, (uint32_t) ts.tv_sec, len,
 			buff_tmp, "sys_sendto"));
-	
+
  out:
 	kfree(buff_tmp);
 	jprobe_return();
@@ -389,17 +389,17 @@ long handle_sendmsg_readmsg(int fd, struct msghdr __user * msg,
 	uint8_t *iov_tmp;
 	int i;
 	int j;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor  */
-	if (!intercept(current->cred->uid)) 
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	printk("RV; sys_sendmsg/recvmsg; uid=%d\n", current->cred->uid);
-	
+
 	msg_tmp = kmalloc(sizeof(struct msghdr), GFP_KERNEL);
 	if (copy_from_user(msg_tmp, msg, sizeof(struct msghdr)))
 		goto out_msg;
-	
+
 	msg_iov_tmp = kmalloc(msg_tmp->msg_iovlen * sizeof(struct iovec),
 			GFP_KERNEL);
 	if (copy_from_user(msg_iov_tmp, msg_tmp->msg_iov,
@@ -407,8 +407,8 @@ long handle_sendmsg_readmsg(int fd, struct msghdr __user * msg,
 		kfree(msg_iov_tmp);
 		goto out_msg;
 	}
-	
-	for (i = 0; i < msg_tmp->msg_iovlen; i++) {		
+
+	for (i = 0; i < msg_tmp->msg_iovlen; i++) {
 		iov_tmp = kmalloc(msg_iov_tmp[i].iov_len, GFP_KERNEL);
 		if (copy_from_user(iov_tmp, msg_iov_tmp[i].iov_base,
 					msg_iov_tmp[i].iov_len)) {
@@ -416,8 +416,8 @@ long handle_sendmsg_readmsg(int fd, struct msghdr __user * msg,
 			kfree(iov_tmp);
 			goto out_msg;
 		}
-		getnstimeofday(&ts); 
-		
+		getnstimeofday(&ts);
+
 		if (send) {
 			printk("RV; sys_sendmsg; uid=%d, fd = %d, msg_iovlen=%d, iov_len=%d, iov=",
 				current->cred->uid, fd, msg_tmp->msg_iovlen, msg_iov_tmp[i].iov_len);
@@ -428,17 +428,17 @@ long handle_sendmsg_readmsg(int fd, struct msghdr __user * msg,
 				current->cred->uid, fd, msg_tmp->msg_iovlen, msg_iov_tmp[i].iov_len);
 			N(send_event(0,  current->cred->uid, (uint32_t) ts.tv_sec, msg_iov_tmp[i].iov_len, iov_tmp, "sys_recvmsg"));
 		}
-		//#ifdef DEBUG_ON   
+		//#ifdef DEBUG_ON
 		for (j = 0; j < msg_iov_tmp[i].iov_len; j++)
 			printk("%c", iov_tmp[j]);
-		printk("\n");   
+		printk("\n");
 		//#endif
-		
-		kfree(iov_tmp);          
+
+		kfree(iov_tmp);
 	}
-	
+
 	kfree(msg_iov_tmp);
-	
+
  out_msg:
 	kfree(msg_tmp);
 	jprobe_return();
@@ -448,11 +448,11 @@ long handle_sendmsg_readmsg(int fd, struct msghdr __user * msg,
 asmlinkage long trace_sys_sendmsg(int fd, struct msghdr __user *msg,
 				unsigned flags)
 {
-	return handle_sendmsg_readmsg(fd, msg, flags, true);      
+	return handle_sendmsg_readmsg(fd, msg, flags, true);
 }
 
 /* recv() - only on a connected socket, identical to recvfrom() with a
- * NULL src_addr argument 
+ * NULL src_addr argument
  * recvmsg() - equivalent to sendmsg()
  */
 asmlinkage long trace_sys_recvmsg(int fd, struct msghdr __user * msg,
@@ -472,24 +472,24 @@ int trace_do_execve(char *filename, char __user *__user *argv,
 	struct timespec ts;
 	int i = 0;
 	char *tmp;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor  */
 	if (!intercept(current->cred->uid)) {
 		jprobe_return();
 		return 0;
 	}
-	
+
 	printk("RV; do_execve; uid=%d\n", current->cred->uid);
-	
-	getnstimeofday(&ts);  
-	
+
+	getnstimeofday(&ts);
+
 	// TODO argv
-	
+
 	// count how many arguments
 	if (argv) {
 		for (;;) {
 			char __user *p;
-			
+
 			if (get_user(p, argv))
 				goto out;
 			if (!p)
@@ -500,7 +500,7 @@ int trace_do_execve(char *filename, char __user *__user *argv,
 			tmp = __getname();
 			ret = strncpy_from_user(tmp, p, PATH_MAX + 1);
 			if (ret <= 0) {
-				putname(tmp);      
+				putname(tmp);
 				break;
 			}
 			printk("RV; do_execve; arg=%s\n", p);
@@ -508,66 +508,66 @@ int trace_do_execve(char *filename, char __user *__user *argv,
 			cond_resched();
 		}
 	}
-	
+
 	printk("RV; do_execve; path = %s, uid = %d, count_args = %d\n",
 	       filename, current->cred->uid, i);
 	N(send_event(0, current->cred->uid, (uint32_t) ts.tv_sec,
 			strlen(filename), filename, "do_execve"));
-	
+
  out:
 	jprobe_return();
 	return 0;
 }
 
-/* 
- *  system-independent routine of sys_fork 
+/*
+ *  system-independent routine of sys_fork
  */
 long trace_do_fork(unsigned long clone_flags, unsigned long stack_start,
 		   struct pt_regs *regs, unsigned long stack_size,
 		   int __user *parent_tidptr, int __user *child_tidptr)
 {
 	struct timespec ts;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor  */
-	if (!intercept(current->cred->uid)) 
+	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	getnstimeofday(&ts);
-	
+
 	D(printk("RV; do_fork; parent_tidptr = 0x%p, child_tidptr = 0x%p,"
 		 " pid = %d, uid = %d, euid = %d\n",
 		 parent_tidptr, child_tidptr,
 		 current->pid, current->cred->uid, (current->cred)->euid);)
 		N(send_event(0,  current->cred->uid, (uint32_t) ts.tv_sec, 0,
 				NULL, "do_fork"));
-	
+
 	jprobe_return();
 	return 0;
 }
 
 asmlinkage long trace_sys_uselib(const char __user *library)
 {
-	char *library_tmp;  
+	char *library_tmp;
 	int ret;
 	struct timespec ts;
-	
+
 	/* only monitor apps in list apps_uid_to_monitor  */
 	if (!intercept(current->cred->uid))
 		jprobe_return();
-	
+
 	printk("RV; sys_uselib; uid=%d\n", current->cred->uid);
-	
+
 	library_tmp = __getname();
 	ret = strncpy_from_user(library_tmp, library, PATH_MAX + 1);
-	if (ret <= 0) 
+	if (ret <= 0)
 		goto out;
 	getnstimeofday(&ts);
-	
+
 	printk("RV; sys_uselib; library = %s, uid = %d",
 		library_tmp, current->pid);
 	N(send_event(0, current->cred->uid, (uint32_t) ts.tv_sec,
 			strlen(library_tmp), library_tmp, "sys_uselib"));
-	
+
  out:
 	putname(library_tmp);
 	jprobe_return();
@@ -578,17 +578,17 @@ asmlinkage long trace_sys_uselib(const char __user *library)
 /*
   asmlinkage long trace_sys_socket(int family, int type, int protocol) {
   printk("RV; socket family=%d, uid=%d.\n", family, current->cred->uid);
-  
+
   jprobe_return();
   return 0;
   }
 */
 
 #define CREATE_JPROBE(victim, target)		     \
-        static struct jprobe jp_##victim = {	     \
-                .entry = target,		     \
-                .kp.symbol_name = #victim,	     \
-        }
+	static struct jprobe jp_##victim = {	     \
+		.entry = target,		     \
+		.kp.symbol_name = #victim,	     \
+	}
 
 CREATE_JPROBE(binder_thread_write, trace_binder_thread_write);
 //CREATE_JPROBE(do_execve, trace_do_execve);
@@ -603,14 +603,14 @@ CREATE_JPROBE(binder_thread_write, trace_binder_thread_write);
 //CREATE_JPROBE(sys_connect, trace_sys_connect);
 //CREATE_JPROBE(sys_socket, trace_sys_socket);
 
-/* Note: prefix of jprobe objects 
+/* Note: prefix of jprobe objects
 is defined as jp_ in CREATE_JPROBE */
 #define NUM_PROBES 1
 static struct jprobe *jprobes[NUM_PROBES] = {
 	&jp_binder_thread_write
 	//&jp_sys_socket
 	//&jp_sys_sendto,
-	//&jp_sys_sendmsg,  
+	//&jp_sys_sendmsg,
 	//&jp_sys_recvmsg,
 	//&jp_do_fork,
 	//&jp_sys_read,
@@ -625,14 +625,14 @@ static int __init droidtracer_init(void)
 {
 	int err;
 	int i;
-	
-	/* plant jprobes */  
+
+	/* plant jprobes */
 	err = register_jprobes(jprobes, NUM_PROBES);
 	if (err) {
 		printk(KERN_ERR "RV; register_jprobes failed: %d\n", err);
 		goto out;
 	}
-	printk(KERN_INFO "RV; planted %d jprobes\n", NUM_PROBES);  
+	printk(KERN_INFO "RV; planted %d jprobes\n", NUM_PROBES);
 
 	/* registers new family name with
 	   generic netlink mechanism */
@@ -647,7 +647,7 @@ static int __init droidtracer_init(void)
 	err = droidtracer_register_genl_ops();
 	if (err)
 		goto out;
-	
+
 	printk(KERN_INFO "RV; netlink operations registered\n");
 
 	/* specific UIDs being traced via module parameter */
@@ -672,7 +672,7 @@ static void __exit droidtracer_exit(void)
 		printk(KERN_ERR
 			"RV; failed to unregister netlink family: %d\n", err);
 
-	printk(KERN_INFO "RV; Good bye! Droidtracer module unloaded\n");
+	printk(KERN_INFO "RV; module unloaded. Good bye, droidtracer!\n");
 }
 
 module_init(droidtracer_init);

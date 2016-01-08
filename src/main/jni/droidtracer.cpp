@@ -57,13 +57,13 @@
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 /* add this line, to avoiding writing 'std::' every time a string (or
-   any other container) is declared */  
-using namespace std; 
+   any other container) is declared */
+using namespace std;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-	
+
 	/* cached refs for later callbacks */
 	JavaVM *g_vm;
 	jobject g_obj;
@@ -89,7 +89,7 @@ extern "C" {
 		err = genlmsg_parse(nlh, 0, attrs, ATTR_MAX, policy);
 		if (err)
 			LOGE("wrong netlink header");
-		
+
 		err = g_vm->GetEnv((void **) &g_env, JNI_VERSION_1_6);
 		if (err) {
 			if (err == JNI_EDETACHED) {
@@ -102,35 +102,35 @@ extern "C" {
 				return -1;
 			}
 		}
-		
-		if (attrs[CODE] && attrs[PARCEL] && attrs[UID] && attrs[TIME]) {      
+
+		if (attrs[CODE] && attrs[PARCEL] && attrs[UID] && attrs[TIME]) {
 			/*
 			  int len = nla_len(attrs[PARCEL]);
-			  
+
 			  // create java byte array from DATA
 			  jbyteArray bArray = g_env->NewByteArray(len);
 			  if (bArray == NULL) {
-			  return NULL; // out of memory error thrown 
+			  return NULL; // out of memory error thrown
 			  }
 			  int j;
-			  
+
 			  // fill a temp structure to use to populate the java int array
 			  if(len > tmp_array_len) {
-			  tmp_array_len = len;	
+			  tmp_array_len = len;
 			  tmp_array = new jbyte[len];
-			  }	
+			  }
 			  for (j = 0; j < len; j++) {
 			  // put whatever logic you want to populate the values here.
-			  tmp_array[j] = *((uint8_t *) nla_data(attrs[PARCEL])+j); 
+			  tmp_array[j] = *((uint8_t *) nla_data(attrs[PARCEL])+j);
 			  }
-			  g_env->SetByteArrayRegion(bArray, 0, len, tmp_array);      
+			  g_env->SetByteArrayRegion(bArray, 0, len, tmp_array);
 			*/
 
 			// a Java reference that holds a pointer to the c++ buffer */
 			jobject bArray = g_env->NewDirectByteBuffer(nla_data(attrs[PARCEL]), nla_len(attrs[PARCEL]));
 
 			jstring syscall = NULL;
-			/* for other syscalls (except Binder) */			
+			/* for other syscalls (except Binder) */
 			if(attrs[SERVICE])
 				syscall = g_env->NewStringUTF(nla_get_string(attrs[SERVICE]));
 
@@ -138,19 +138,19 @@ extern "C" {
 			g_env->CallVoidMethod(g_obj, g_mids["onNetlink"], syscall,
 					      (jint) nla_get_u32(attrs[UID]),
 					      (jint) nla_get_u32(attrs[TIME]),
-					      (jint) nla_get_u8(attrs[CODE]), 
-					      bArray, (jlong)  nlh->nlmsg_seq);          	
+					      (jint) nla_get_u8(attrs[CODE]),
+					      bArray, (jlong)  nlh->nlmsg_seq);
 
-			if(attrs[SERVICE])				
+			if(attrs[SERVICE])
 				g_env->DeleteLocalRef(syscall);
-			
+
 			// only needed if getByteArrayElements was called
 			//g_env->ReleaseByteArrayElements(bArray, fill, 0);
-			g_env->DeleteLocalRef(bArray);         
+			g_env->DeleteLocalRef(bArray);
 			/*
 			  if (g_env->ExceptionCheck()) {
 			    g_env->ExceptionDescribe();
-			  }			  
+			  }
 			  g_vm->DetachCurrentThread();
 			*/
 		}
@@ -160,85 +160,101 @@ extern "C" {
 	static jboolean genl_send_int(uint8_t cmd, uid_t value) {
 		struct nl_msg *msg;
 		struct my_hdr *msg_hdr;
-		
-		if(!sock || family < 0) 
-			return JNI_FALSE;  
-		
-		/* allocate memory for message 
+
+		if(!sock || family < 0)
+			return JNI_FALSE;
+
+		/* allocate memory for message
 		   (incl. space for header) */
 		msg = nlmsg_alloc();
 		if(!msg)
 			return JNI_FALSE;
-		
+
 		/* add generic nl headers to netlink message */
 		genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ,
 			    family, 0, NLM_F_ECHO, cmd, VERSION_NR);
-		
+
 		/* jint is 'signed 32 bits' */
 		nla_put_u32(msg, UID, value);
-		
+
 		nl_send_auto(sock, msg);
 		nlmsg_free(msg);
-		
+
 		return JNI_TRUE;
 	}
 
 	static jboolean genl_send_str(uint8_t cmd, jstring value, JNIEnv *env) {
 		struct nl_msg *msg;
-		
-		if(!sock || family < 0) 
-			return JNI_FALSE;  
-		
+
+		if(!sock || family < 0)
+			return JNI_FALSE;
+
 		msg = nlmsg_alloc();
 		if(!msg)
 			return JNI_FALSE;
-		
+
 		genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ,
 			    family, 0, NLM_F_ECHO, cmd, VERSION_NR);
-		
-		const char *c_service = env->GetStringUTFChars(value, 0);  
+
+		const char *c_service = env->GetStringUTFChars(value, 0);
 		nla_put_string(msg, SERVICE, c_service);
-		
+
 		nl_send_auto(sock, msg);
-		nlmsg_free(msg);   
+		nlmsg_free(msg);
 		env->ReleaseStringUTFChars(value, c_service);
-		
+
 		return JNI_TRUE;
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_startInterceptingApp(JNIEnv *env,
-														jobject thiz,
-														jint uid)
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_startTracingApp(JNIEnv *env,
+													   jobject thiz,
+													   jint uid)
 	{
 		return genl_send_int(TRACE_APP, uid);
-	}	
-	
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_stopInterceptingApp(JNIEnv *env,
-													       jobject thiz,
-													       jint uid)
+	}
+
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_stopTracingApp(JNIEnv *env,
+													  jobject thiz,
+													  jint uid)
 	{
 		return genl_send_int(UNTRACE_APP, uid);
 	}
+
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToBlacklist(JNIEnv *env,
+														   jobject thiz,
+														   jstring interface)
+	{
+		return genl_send_str(ADD_BLACKLIST_INTERFACE, interface, env);
+	}
+
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromBlacklist(JNIEnv *env,
+															jobject thiz,
+															jstring interface)
+	{
+		return genl_send_str(REMOVE_BLACKLIST_INTERFACE, interface, env);
+	}
+
+
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToWhitelist(JNIEnv *env,
+														   jobject thiz,
+														   jstring interface)
+	{
+		return genl_send_str(ADD_WHITELIST_INTERFACE, interface, env);
+	}
+
+	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromWhitelist(JNIEnv *env,
+															jobject thiz,
+															jstring interface)
+	{
+		return genl_send_str(REMOVE_WHITELIST_INTERFACE, interface, env);
+	}
+
 
 	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_setLowestUidTraced(JNIEnv *env,
 													      jobject thiz,
 													      jint uid)
 	{
 		return genl_send_int(SET_LOWEST_UID_TRACED, uid);
-	}
-	
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addServiceToBlacklist(JNIEnv *env,
-														 jobject thiz,
-														 jstring service)
-	{
-		return genl_send_str(BLACKLIST_INTERFACE, service, env);
-	}
-
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addServiceToWhitelist(JNIEnv *env,
-														 jobject thiz,
-														 jstring service)
-	{
-		return genl_send_str(WHITELIST_INTERFACE, service, env);
 	}
 
 	/*
@@ -251,21 +267,21 @@ extern "C" {
 													    jstring methodSignature)
 	{
 		env->GetJavaVM(&g_vm);
-		
-		/* convert local to global reference 
+
+		/* convert local to global reference
 		   (local will die after this method call) */
 		g_obj = env->NewGlobalRef(obj);
-		
+
 		// save refs for callback
 		jclass g_clazz = env->GetObjectClass(g_obj);
 		jclass g_superclazz = env->GetSuperclass(g_clazz);
-		
+
 		if (!g_superclazz) {
 			LOGE("class not found");
 			return JNI_FALSE;
-		}  
+		}
 
-		/* convert and assign Java String to C-String 
+		/* convert and assign Java String to C-String
 		   TODO use NewString, GetStringLength, GetStringChars? */
 		const char *c_method = env->GetStringUTFChars(method, 0);
 		const char *c_methodSignature = env->GetStringUTFChars(methodSignature, 0);
@@ -273,22 +289,22 @@ extern "C" {
 
 		g_mids[string(c_method, c_method_len)] = env->GetMethodID(g_superclazz,
 									  c_method, c_methodSignature);
-		
-		if (!g_mids[string(c_method, c_method_len)]) {    
+
+		if (!g_mids[string(c_method, c_method_len)]) {
 			LOGE("method not found: %s", c_method);
 			return JNI_FALSE;
 		}
 		env->ReleaseStringUTFChars(method, c_method);
-		env->ReleaseStringUTFChars(methodSignature, c_methodSignature);    
+		env->ReleaseStringUTFChars(methodSignature, c_methodSignature);
 
 		return JNI_TRUE;
 	}
-	
+
 	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_initNetlink(JNIEnv* env,
 												       jobject thiz)
 	{
 		int err;
-		
+
 		policy[TIME].type = NLA_U32;
 		policy[CODE].type = NLA_U8;
 		policy[PARCEL].type = NLA_UNSPEC;
@@ -308,14 +324,14 @@ extern "C" {
 		  size_t bla = nl_socket_get_msg_buf_size(sock);
 		  LOGD("%zu", bla);
 		*/
-		
+
 		/* connect to kernel side */
 		err = genl_connect(sock);
 		if(err) {
 			LOGE("genl_connect failed: %s", nl_geterror(err));
 			return JNI_FALSE;
 		}
-		
+
 		/* ask kernel to resolve family name to family id */
 		family = genl_ctrl_resolve(sock, FAMILY_NAME);
 		if(family < 0) {
@@ -328,29 +344,29 @@ extern "C" {
 		 */
 		err = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM,
 					  on_netlink_event, NULL);
-		if(err) 
+		if(err)
 			return JNI_FALSE;
-		
+
 		nl_socket_disable_seq_check(sock);
 
-		/* tell kernel module UID of droidtracer, 
+		/* tell kernel module UID of droidtracer,
 		   so droidtracer is never traced itself */
 		if(!genl_send_int(SET_DROIDTRACER_UID, getuid()))
 			return JNI_FALSE;
-		
+
 		LOGI("netlink initialised, start receiving messages");
 
 		/*
 		 * Start receiving messages. The function
 		 * nl_recvmsgs_default() will block (no polling) until
 		 * one or more netlink messages are received
-		 */	
+		 */
 		while(1) {
-			if(int err = nl_recvmsgs_default(sock)) 
+			if(int err = nl_recvmsgs_default(sock))
 				LOGE("failed to receive message: %d", err);
 		}
 	}
-	
+
 #ifdef __cplusplus
 }
 #endif
