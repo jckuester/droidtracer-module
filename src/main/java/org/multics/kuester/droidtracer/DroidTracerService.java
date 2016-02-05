@@ -34,6 +34,7 @@ import android.os.IBinder;
 import android.os.Parcel;
 import android.util.Log;
 import android.util.SparseArray;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -50,6 +51,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -90,24 +93,18 @@ public class DroidTracerService extends Service {
     private Map<String, SparseArray<String>> methodNames = new HashMap<String, SparseArray<String>>();
     private Map<String, SparseArray<String[]>> methodSignatures = new HashMap<String, SparseArray<String[]>>();
 
-    private ReceiveEventStream bla = new ReceiveEventStream();
+    ExecutorService executor = Executors.newFixedThreadPool(1);
     protected OnEventCallback callback;
 
     @Override
     public void onCreate() {
-        Log.i(logTag,"run netlink communication in different thread: " + bla.isCancelled());
         // run netlink communication in different thread
-        bla.execute();
+        executor.execute(new ReceiveEventStream());
     }
 
     @Override
     public void onDestroy() {
-        Log.i(logTag, "destroyed");
-        bla.cancel(true);
-    }
-
-    public void registerOnEventListener(OnEventCallback callback) {
-        this.callback = callback;
+        executor.shutdown();
     }
 
     @Override
@@ -119,8 +116,6 @@ public class DroidTracerService extends Service {
     }
 
     /*
-     * (non-Javadoc)
-     *
      * @see android.app.Service#onBind(android.content.Intent)
      */
     @Override
@@ -229,7 +224,7 @@ public class DroidTracerService extends Service {
     /**
      * Register Java callback method that can be invoked from C++.
      *
-     * @param method the name of Java callback method to register
+     * @param method          the name of Java callback method to register
      * @param methodSignature the Java callback method signature (e.g., "(III[B)V")
      * @return <tt>true</tt> if registering was successful
      */
@@ -325,9 +320,13 @@ public class DroidTracerService extends Service {
         return false;
     }
 
+    protected void registerOnEventListener(OnEventCallback callback) {
+        this.callback = callback;
+    }
+
     /*
+     * NOTE: this method is only called from native library
      * delegates events to either onNetlinkSyscall or onNetlinkBinder
-     * note: this method is only called from native library
      */
     private void onNetlink(String syscall, int uid, int time, int code, ByteBuffer bb, long readErrorCount) {
         //private void onNetlink(String syscall, int uid, int time, int code, byte[] data) {
@@ -349,10 +348,10 @@ public class DroidTracerService extends Service {
     /*
      * Start thread to request events from netlink (no polling, but blocks).
      */
-    private class ReceiveEventStream extends AsyncTask<Void, Void, Void> {
+    private class ReceiveEventStream implements Runnable {
 
         @Override
-        protected Void doInBackground(Void... params) {
+        public void run() {
             // TODO: exception NoSuchMethodError
 
 			/* link Java onNetlink() with on_netlink_event()
@@ -371,31 +370,10 @@ public class DroidTracerService extends Service {
             /* initialize netlink communication,
                and start receiving events */
             initNetlink();
-            return null;
         }
     }
 
-    public void addCodeToMethodNameMapping(String serviceName, int code, String methodName) {
-        SparseArray<String> methodNamesArray = methodNames.get(serviceName);
-
-        if(methodNamesArray == null) {
-            methodNamesArray = new SparseArray<String>();
-            methodNames.put(serviceName, methodNamesArray);
-        }
-        methodNamesArray.put(code, methodName);
-    }
-
-    public void addMethodSignatureMapping(String serviceName, int code, String[] paramTypes) {
-        SparseArray<String[]> methodSignaturesArray = methodSignatures.get(serviceName);
-
-        if (methodSignaturesArray == null) {
-            methodSignaturesArray = new SparseArray<String[]>();
-            methodSignatures.put(serviceName, methodSignaturesArray);
-        }
-        methodSignaturesArray.put(code, paramTypes);
-    }
-
-    public class UnmarshallThread implements Runnable {
+    private class UnmarshallThread implements Runnable {
 
         private String syscall;
         private int time;
@@ -418,7 +396,7 @@ public class DroidTracerService extends Service {
 
         @Override
         public void run() {
-            if(syscall != null) {
+            if (syscall != null) {
 				/*
 				 * for syscalls (not Binder).
 				 */
@@ -434,19 +412,15 @@ public class DroidTracerService extends Service {
         public void onEvent(int time, int uid, String service, String method,
                             List<Object> params, String[] paramTypes, long readErrorCount) {
 
-
-            // USE EVENT FOR YOUR ANALYSIS GOES HERE
-
             callback.onEvent(time, uid, service, method, params, paramTypes, readErrorCount);
         }
 
         /**
-         *
          * @param syscall name of syscall that triggered event.
-         * @param uid Linux UID, which identifies an app.
-         * @param time Unix time stamp (seconds since 1970).
-         * @param data relevant intercepted syscall data (note: data can contain tail of unused
-         *             previous junk)
+         * @param uid     Linux UID, which identifies an app.
+         * @param time    Unix time stamp (seconds since 1970).
+         * @param data    relevant intercepted syscall data (note: data can contain tail of unused
+         *                previous junk)
          */
         private void onNetlinkSyscall(String syscall, int uid, int time, byte[] data,
                                       int dataSize, long readErrorCount) {
