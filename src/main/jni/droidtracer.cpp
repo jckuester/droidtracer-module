@@ -127,12 +127,15 @@ extern "C" {
 			*/
 
 			// a Java reference that holds a pointer to the c++ buffer */
-			jobject bArray = g_env->NewDirectByteBuffer(nla_data(attrs[PARCEL]), nla_len(attrs[PARCEL]));
+			jobject bArray = g_env->
+				NewDirectByteBuffer(nla_data(attrs[PARCEL]),
+						    nla_len(attrs[PARCEL]));
 
 			jstring syscall = NULL;
 			/* for other syscalls (except Binder) */
 			if(attrs[SERVICE])
-				syscall = g_env->NewStringUTF(nla_get_string(attrs[SERVICE]));
+				syscall = g_env->
+					NewStringUTF(nla_get_string(attrs[SERVICE]));
 
 			/* execute java-callback method */
 			g_env->CallVoidMethod(g_obj, g_mids["onNetlink"], syscall,
@@ -157,7 +160,8 @@ extern "C" {
 		return 0;
 	}
 
-	static jboolean genl_send_int(uint8_t cmd, uid_t value) {
+	static jboolean genl_send_int(uint8_t cmd, uid_t value)
+	{
 		struct nl_msg *msg;
 		struct my_hdr *msg_hdr;
 
@@ -183,7 +187,8 @@ extern "C" {
 		return JNI_TRUE;
 	}
 
-	static jboolean genl_send_str(uint8_t cmd, jstring value, JNIEnv *env) {
+	static jboolean genl_send_str(uint8_t cmd, jstring value, JNIEnv *env)
+	{
 		struct nl_msg *msg;
 
 		if(!sock || family < 0)
@@ -206,53 +211,53 @@ extern "C" {
 		return JNI_TRUE;
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_startTracingApp(JNIEnv *env,
-													   jobject thiz,
-													   jint uid)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_startTracingApp
+	(JNIEnv *env, jobject thiz, jint uid)
 	{
 		return genl_send_int(TRACE_APP, uid);
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_stopTracingApp(JNIEnv *env,
-													  jobject thiz,
-													  jint uid)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_stopTracingApp
+	(JNIEnv *env, jobject thiz, jint uid)
 	{
 		return genl_send_int(UNTRACE_APP, uid);
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToBlacklist(JNIEnv *env,
-														   jobject thiz,
-														   jstring interface)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToBlacklist
+	(JNIEnv *env, jobject thiz, jstring interface)
 	{
 		return genl_send_str(ADD_BLACKLIST_INTERFACE, interface, env);
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromBlacklist(JNIEnv *env,
-															jobject thiz,
-															jstring interface)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromBlacklist
+	(JNIEnv *env, jobject thiz, jstring interface)
 	{
 		return genl_send_str(REMOVE_BLACKLIST_INTERFACE, interface, env);
 	}
 
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToWhitelist(JNIEnv *env,
-														   jobject thiz,
-														   jstring interface)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_addInterfaceToWhitelist
+	(JNIEnv *env, jobject thiz, jstring interface)
 	{
 		return genl_send_str(ADD_WHITELIST_INTERFACE, interface, env);
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromWhitelist(JNIEnv *env,
-															jobject thiz,
-															jstring interface)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_removeInterfaceFromWhitelist
+	(JNIEnv *env, jobject thiz, jstring interface)
 	{
 		return genl_send_str(REMOVE_WHITELIST_INTERFACE, interface, env);
 	}
 
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_setLowestUidTraced(JNIEnv *env,
-													      jobject thiz,
-													      jint uid)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_setLowestUidTraced
+	(JNIEnv *env, jobject thiz, jint uid)
 	{
 		return genl_send_int(SET_LOWEST_UID_TRACED, uid);
 	}
@@ -261,10 +266,9 @@ extern "C" {
 	 * Register Java callback method that can be invoked from C++.
 	 * E.g., used to connect "onNetlinkEvent" in Java with "on_netlink_event"
 	 */
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_registerCallback(JNIEnv *env,
-													    jobject obj,
-													    jstring method,
-													    jstring methodSignature)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_registerCallback
+	(JNIEnv *env, jobject obj, jstring method, jstring methodSignature)
 	{
 		env->GetJavaVM(&g_vm);
 
@@ -284,12 +288,14 @@ extern "C" {
 		/* convert and assign Java String to C-String
 		   TODO use NewString, GetStringLength, GetStringChars? */
 		const char *c_method = env->GetStringUTFChars(method, 0);
-		const char *c_methodSignature = env->GetStringUTFChars(methodSignature, 0);
+		const char *c_methodSignature =
+			env->GetStringUTFChars(methodSignature, 0);
 		jint c_method_len = env->GetStringUTFLength(method);
 
-		g_mids[string(c_method, c_method_len)] = env->GetMethodID(g_superclazz,
-									  c_method, c_methodSignature);
-
+		g_mids[string(c_method, c_method_len)] =
+			env->GetMethodID(g_superclazz,
+					 c_method, c_methodSignature);
+		
 		if (!g_mids[string(c_method, c_method_len)]) {
 			LOGE("method not found: %s", c_method);
 			return JNI_FALSE;
@@ -300,8 +306,9 @@ extern "C" {
 		return JNI_TRUE;
 	}
 
-	JNIEXPORT jboolean JNICALL Java_org_multics_kuester_droidtracer_DroidTracerService_initNetlink(JNIEnv* env,
-												       jobject thiz)
+	JNIEXPORT jboolean JNICALL
+	Java_org_multics_kuester_droidtracer_DroidTracerService_initNetlink
+	(JNIEnv* env, jobject thiz)
 	{
 		int err;
 

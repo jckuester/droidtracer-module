@@ -543,8 +543,19 @@ out:
 static int cb_remove_whitelist_interface(struct sk_buff *skb,
 					struct genl_info *info)
 {
-	// TODO
-	return 0;
+/*
+	struct rbnode_iface *data = get_blacklisted_iface(info->ATTR[SERVICE]);
+
+	if (data) {
+		if(data->whitelist) {
+			rb_erase(&data->node, &rbroot_appuids_traced);
+			kfree(data);
+
+			return true;
+		}
+	}
+*/
+	return false;
 }
 
 static int cb_set_droidtracer_uid(struct sk_buff *skb, struct genl_info *info)

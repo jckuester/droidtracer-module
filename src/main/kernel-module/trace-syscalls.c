@@ -151,7 +151,7 @@ static int trace_binder_thread_write(struct binder_proc *proc,
 				get_blacklisted_iface(interface, iface_len+1);
 			if (iface_node) {
 				/* service in black or white list */
-				if (iface_node->whitelist) {
+				if (!iface_node->whitelist) {
 					/* entry is in blacklist */
 					jprobe_return();
 				}

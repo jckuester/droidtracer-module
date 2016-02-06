@@ -25,9 +25,6 @@ package org.multics.kuester.droidtracer;
 import android.app.Notification;
 import android.app.Service;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
-import android.os.AsyncTask;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -60,30 +57,30 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author Jan-Christoph Kuester
- *
- * TODO extend IntentService; is used to perform a certain task in the background.
- * Once done, the instance of IntentService terminate itself automatically
+ * @version 0.2.1
+ * <p/>
+ * TODO extend IntentService?; used to perform certain task in the background. Once done, terminates itself automatically
  */
 public class DroidTracerService extends Service {
 
-    // 0) LOGGING OFF, 1) ERROR, 2) INFO, 3) DEBUG
-    private static final int LOGLEVEL = 0;
+    /**
+     * 0) LOGGING OFF (default)
+     * 1) ERROR
+     * 2) INFO
+     * 3) DEBUG
+     */
+    public final int LOGLEVEL = 0;
 
-    public static final boolean ERROR = LOGLEVEL > 0;
-    public static final boolean INFO = LOGLEVEL > 1;
-    public static final boolean DEBUG = LOGLEVEL > 2;
+    private final boolean ERROR = LOGLEVEL > 0;
+    private final boolean INFO = LOGLEVEL > 1;
+    private final boolean DEBUG = LOGLEVEL > 2;
 
-    public static byte[] data = new byte[120];
+    private static byte[] data = new byte[120];
 
     // TODO use newSingleThreadScheduledExecutor
     //private final ExecutorService unmarhallExecutorService = Executors.newFixedThreadPool(1);
     private final SingleThreadPoolExecutor unmarhallExecutorService = new SingleThreadPoolExecutor(1);
 
-    static {
-    /* load shared C++ JNI library
-         *  @see jni/libdroidtracer.so */
-        System.loadLibrary("droidtracer");
-    }
 
     private static String logTag = "RV; DroidTracerService.java";
 
@@ -95,6 +92,12 @@ public class DroidTracerService extends Service {
 
     ExecutorService executor = Executors.newFixedThreadPool(1);
     protected OnEventCallback callback;
+
+    static {
+        /* load shared C++ JNI library
+         *  @see jni/libdroidtracer.so */
+        System.loadLibrary("droidtracer");
+    }
 
     @Override
     public void onCreate() {
@@ -188,8 +191,8 @@ public class DroidTracerService extends Service {
      *
      * @param interfaceName the IBinder interface name that identifies a service
      * @return <tt>true</tt> if notifying the kernel module about this action was successful
-     */
     public native boolean removeInterfaceFromBlacklist(String interfaceName);
+     */
 
     /**
      * Whitelist an interface, so Binder transactions to the respective service are always traced.
@@ -207,8 +210,8 @@ public class DroidTracerService extends Service {
      *
      * @param interfaceName the IBinder interface name that identifies a service
      * @return <tt>true</tt> if notifying the kernel module about this action was successful
-     */
     public native boolean removeInterfaceFromWhitelist(String interfaceName);
+     */
 
     /**
      * Trace all apps with an equal or higher UID.
@@ -263,18 +266,29 @@ public class DroidTracerService extends Service {
 
     /**
      * Loads the droidtracer kernel module.
+     *
+     * @return <tt>true</tt> if the kernel module is loaded
      */
-    public static void loadKernelModule() {
+    public static boolean loadKernelModule() {
         executeCommand("su", "-c", "insmod /sdcard/com.monitorme/droidtracer.ko");
+        return isKernelModuleLoaded();
     }
 
     /**
      * Unloads the droidtracer kernel module.
+     *
+     * @return <tt>true</tt> if the kernel module is unloaded
      */
-    public static void unloadKernelModule() {
+    public static boolean unloadKernelModule() {
         executeCommand("su", "-c", "rmmod droidtracer.ko");
+        if(isKernelModuleLoaded()) {
+            return false;
+        } else {
+            return true;
+        }
     }
 
+    /*
     // TODO boot image is for my device hardcoded
     public static void flashKprobesKernel() {
         executeCommand("su", "-c", "dd if='/sdcard/com.monitorme/boot_nexus5_LMY48B_kprobes.img'",
@@ -286,12 +300,53 @@ public class DroidTracerService extends Service {
         executeCommand("su", "-c", "dd if='/sdcard/com.monitorme/my_nexus5_LMY48B_boot.img'",
                 "of='/dev/block/platform/msm_sdcc.1/by-name/boot'");
     }
+    */
 
     /**
      * Reboots the device.
      */
     public static void reboot() {
         executeCommand("su", "-c", "reboot");
+    }
+
+    /**
+     * Store method name for an interface name and Binder code
+     *
+     * Discover method name in the Android framework only once via reflection,
+     * and remember it in a hashmap via this method (reduces overhead).
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @param code the integer that encodes a method name
+     * @param methodName the method name encoded in "code"
+     */
+    private void addCodeToMethodNameMapping(String interfaceName, int code, String methodName) {
+        SparseArray<String> methodNamesArray = methodNames.get(interfaceName);
+
+        if (methodNamesArray == null) {
+            methodNamesArray = new SparseArray<String>();
+            methodNames.put(interfaceName, methodNamesArray);
+        }
+        methodNamesArray.put(code, methodName);
+    }
+
+    /**
+     * Store types of method parameters
+     *
+     * Discover method signature in the Android framework only once via reflection,
+     * and remember it in a hashmap via this method (reduces overhead).
+     *
+     * @param interfaceName the IBinder interface name that identifies a service
+     * @param code the integer that encodes a method name
+     * @param paramTypes the parameter types
+     */
+    private void addMethodSignatureMapping(String interfaceName, int code, String[] paramTypes) {
+        SparseArray<String[]> methodSignaturesArray = methodSignatures.get(interfaceName);
+
+        if (methodSignaturesArray == null) {
+            methodSignaturesArray = new SparseArray<String[]>();
+            methodSignatures.put(interfaceName, methodSignaturesArray);
+        }
+        methodSignaturesArray.put(code, paramTypes);
     }
 
     private static boolean executeCommand(String... command) {
@@ -429,35 +484,35 @@ public class DroidTracerService extends Service {
             String[] paramTypes = null;
 
 
-            if(syscall.equals("do_execve")) {
+            if (syscall.equals("do_execve")) {
 
                 try {
-                    paramTypes = new String[] {"fileName"};
+                    paramTypes = new String[]{"fileName"};
                     String path = new String(data, "UTF-8"); //new String(Arrays.copyOfRange(data, 0, dataSize), "UTF-8");
                     params.add(path);
-                    if(DEBUG) Log.d(logTag, syscall + ": " + path);
+                    if (DEBUG) Log.d(logTag, syscall + ": " + path);
                 } catch (UnsupportedEncodingException e) {
                     Log.e(logTag, "onNetlinkSyscall(), do_execve", e);
                     params.add("N/A");
                 }
 
-            } else if(syscall.equals("sys_open")) {
+            } else if (syscall.equals("sys_open")) {
                 // SD card: sys_open
 
                 try {
-                    paramTypes = new String[] {"fileName"};
+                    paramTypes = new String[]{"fileName"};
                     String path = new String(Arrays.copyOfRange(data, 0, dataSize), "UTF-8");
                     params.add(path);
-                    if(DEBUG) Log.d(logTag, syscall + ": " + path);
+                    if (DEBUG) Log.d(logTag, syscall + ": " + path);
                 } catch (UnsupportedEncodingException e) {
                     Log.e(logTag, "onNetlinkSyscall(), sys_open", e);
                     params.add("N/A");
                 }
 
-            } else if(syscall.equals("sys_connect")) {
+            } else if (syscall.equals("sys_connect")) {
                 // internet: sys_connect
                 try {
-                    paramTypes = new String[] {"host"};
+                    paramTypes = new String[]{"host"};
                     // IPv6, e.g. android.com: 0000:0000:0000:0000:0000:ffff:dcf4:df72
                     String host = InetAddress.getByAddress(Arrays.copyOfRange(data, 0, dataSize))
                             .getHostName();
@@ -479,23 +534,23 @@ public class DroidTracerService extends Service {
 
                 if (DEBUG) Log.d(logTag, "IP: " + ip);
                 */
-            } else if(syscall.equals("sys_sendto") || syscall.equals("sys_sendmsg")
+            } else if (syscall.equals("sys_sendto") || syscall.equals("sys_sendmsg")
                     || syscall.equals("sys_recvmsg")) {
                 try {
-                    paramTypes = new String[] {"buffer"};
+                    paramTypes = new String[]{"buffer"};
                     String path = new String(data, "UTF-8"); // new String(Arrays.copyOfRange(data, 0, dataSize), "UTF-8");
                     params.add(path);
-                    if(DEBUG) Log.d(logTag, syscall + ": " + path);
+                    if (DEBUG) Log.d(logTag, syscall + ": " + path);
                 } catch (Exception e) {
                     Log.e(logTag, "onNetlinkSyscall(), " + syscall, e);
                     params.add("N/A");
                 }
-            } else if(syscall.equals("sys_uselib")) {
+            } else if (syscall.equals("sys_uselib")) {
                 try {
-                    paramTypes = new String[] {"library"};
+                    paramTypes = new String[]{"library"};
                     String path = new String(data, "UTF-8"); // new String(Arrays.copyOfRange(data, 0, dataSize), "UTF-8");
                     params.add(path);
-                    if(DEBUG) Log.d(logTag, syscall + ": " + path);
+                    if (DEBUG) Log.d(logTag, syscall + ": " + path);
                 } catch (Exception e) {
                     Log.e(logTag, "onNetlinkSyscall(), " + syscall, e);
                     params.add("N/A");
@@ -508,7 +563,8 @@ public class DroidTracerService extends Service {
 
         /**
          * Callback method that receives low-level Binder event from netlink and unmarshalls it.
-         * @param uid Linux UID, which identifies an app.
+         *
+         * @param uid  Linux UID, which identifies an app.
          * @param time Unix time stamp (seconds since 1970).
          * @param code encoded method name.
          * @param data Parcel object.
@@ -548,13 +604,13 @@ public class DroidTracerService extends Service {
                 if (DEBUG) Log.d(logTag, "service: " + serviceName);
 
                 // read method signature from hash table (if available)
-                try{
+                try {
                     methodName = methodNames.get(serviceName).get(code);
-                } catch(NullPointerException e) {
+                } catch (NullPointerException e) {
                     methodName = null;
                 }
 
-                if(methodName != null) {
+                if (methodName != null) {
                     paramTypes = methodSignatures.get(serviceName).get(code);
                     if (DEBUG) Log.d(logTag, "types of method arguments: " + paramTypes);
                 } else {
@@ -563,7 +619,7 @@ public class DroidTracerService extends Service {
 					 */
                     methodName = getMethodName(serviceName, code);
 
-                    if(methodName != null) {
+                    if (methodName != null) {
 						/*
 						 * 4) reassemble method-signature (i.e., parameter types)
 						 * from interface (via reflection)
@@ -585,7 +641,7 @@ public class DroidTracerService extends Service {
 						/*
 						 * 5) unmarshall method arguments from parcel
 						 */
-                        for (String paramType: paramTypes) {
+                        for (String paramType : paramTypes) {
 							/*
 							 * primitives
 							 */
@@ -612,7 +668,7 @@ public class DroidTracerService extends Service {
                             } else if (paramType.equals("android.os.Bundle")) {
                                 try {
                                     params.add(parcel.readBundle());
-                                } catch(RuntimeException e) {
+                                } catch (RuntimeException e) {
                                     params.add("N/A");
                                 }
                             } else if (paramType.equals("[Ljava.lang.String;")) {
@@ -628,7 +684,7 @@ public class DroidTracerService extends Service {
                                     }
                                 }
                                 params.add(array);
-                            } else if(paramType.equals("android.content.IIntentReceiver")) {
+                            } else if (paramType.equals("android.content.IIntentReceiver")) {
                                 params.add(parcel.readStrongBinder());
                             } else {
 								/*
@@ -646,7 +702,7 @@ public class DroidTracerService extends Service {
                                                     .getClass()
                                                     .getDeclaredMethod(
                                                             "createFromParcel",
-                                                            new Class[] { Parcel.class });
+                                                            new Class[]{Parcel.class});
                                             // call method, e.g., creator.createFromParcel(parcel)
                                             Object result = m.invoke(creator, parcel);
                                             params.add(result);
@@ -662,12 +718,12 @@ public class DroidTracerService extends Service {
                                                         .getClass()
                                                         .getDeclaredMethod(
                                                                 "createFromParcel",
-                                                                new Class[] { Parcel.class });
+                                                                new Class[]{Parcel.class});
                                                 // call method, e.g., creator.createFromParcel(parcel)
                                                 Object result = m.invoke(creator, parcel);
                                                 params.add(result);
                                             } catch (InvocationTargetException ite2) {
-                                                if(DEBUG) Log.d(logTag, "cannot invoke method.");
+                                                if (DEBUG) Log.d(logTag, "cannot invoke method.");
                                                 break;
                                             } catch (Exception e) {
                                                 //Log.e(logTag, "cbAssembleEvent error", e);
@@ -692,19 +748,19 @@ public class DroidTracerService extends Service {
                         }
 
                         // dummy for remaining arguments that couldn't get unmarshalled
-                        for(int j=i; j<paramTypes.length; j++) {
+                        for (int j = i; j < paramTypes.length; j++) {
                             params.add("N/A");
                         }
 
 						/*
 						 * print method-arguments
 						 */
-                        if(DEBUG) printOnNetlinkBinder(params, paramTypes, parcel, i);
+                        if (DEBUG) printOnNetlinkBinder(params, paramTypes, parcel, i);
 
                     } // end paramTpyes != null
 
                 } else { // end methodName != null
-                    if(DEBUG) Log.d(logTag, "method: N/A");
+                    if (DEBUG) Log.d(logTag, "method: N/A");
                     // methodName = Integer.toString(code);
                 } // end reassemble method + arguments
 
@@ -713,18 +769,18 @@ public class DroidTracerService extends Service {
                 parcel.recycle();
 
                 // use code as name if method cannot be unmarshalled
-                if(methodName == null) {
-                    methodName =  "N/A, code: " + String.valueOf(code);
+                if (methodName == null) {
+                    methodName = "N/A, code: " + String.valueOf(code);
                 }
 
                 onEvent(time, uid, serviceName, methodName, params, paramTypes, readErrorCount);
 
             } catch (Exception e) {
-                if(DEBUG) Log.e(logTag, "onNetlinkBinder()", e);
+                if (DEBUG) Log.e(logTag, "onNetlinkBinder()", e);
 
                 // use code as name if method cannot be unmarshalled
-                if(methodName == null) {
-                    methodName =  "N/A, code: " + String.valueOf(code);
+                if (methodName == null) {
+                    methodName = "N/A, code: " + String.valueOf(code);
                 }
 
                 onEvent(time, uid, serviceName, methodName, params, paramTypes, readErrorCount);
@@ -738,7 +794,7 @@ public class DroidTracerService extends Service {
          * TRANSACTION_sendText = (android.os.IBinder.FIRST_CALL_TRANSACTION + 4).
          *
          * @param service interface name of service called (e.g., com.android.internal.telephony.ISms).
-         * @param code encoded method name.
+         * @param code    encoded method name.
          * @return name of a method (null if method name is not found).
          */
         private String getMethodName(String service, int code) {
@@ -810,8 +866,9 @@ public class DroidTracerService extends Service {
 
         /**
          * Get method parameter types via reflection of method signature.
+         *
          * @param service interface name of service called (e.g., com.android.internal.telephony.ISms).
-         * @param method name of method called.
+         * @param method  name of method called.
          * @return array of method types as String.
          */
         private String[] getMethodParameterTypes(String service, String method) {
@@ -836,15 +893,16 @@ public class DroidTracerService extends Service {
                     }
                 }
             } catch (ClassNotFoundException e) {
-                if(DEBUG) Log.d(logTag, "class not found: " + service);
+                if (DEBUG) Log.d(logTag, "class not found: " + service);
             } catch (Exception e) {
-                if(ERROR) Log.e(logTag, "getMethodParameterTypes()", e);
+                if (ERROR) Log.e(logTag, "getMethodParameterTypes()", e);
             }
             return aParamTypes;
         }
 
         /**
          * Get CREATOR variable, which is an instance of 'className'. It is used to invoke createFromParcel() on it, to unmarshall complex objects.
+         *
          * @param className class, which contains CREATOR.
          * @return null if CREATOR not found
          */
@@ -870,7 +928,7 @@ public class DroidTracerService extends Service {
                     }
                 }
             } catch (ClassNotFoundException e) {
-                if(DEBUG) Log.d(logTag, "class not found: " + className);
+                if (DEBUG) Log.d(logTag, "class not found: " + className);
             } catch (Exception e) {
                 //Log.e(logTag, "Error", e);
             }
@@ -879,6 +937,7 @@ public class DroidTracerService extends Service {
 
         /**
          * Create a Parcel object from byte array
+         *
          * @param bytes field buffer intercepted of binder_transaction_data.
          * @return Parcel object.
          */
@@ -909,7 +968,7 @@ public class DroidTracerService extends Service {
         public Runnable obtainRunnable() {
             lock.lock();
             try {
-                if(stack.isEmpty()) {
+                if (stack.isEmpty()) {
                     return new UnmarshallThread();
                 } else {
                     return stack.pop();

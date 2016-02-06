@@ -12,6 +12,11 @@
    without the Java part; for example, to just look at the logs or to
    export raw data
 
+  * fix unregister_jprobes bug   
+
+  * improve Makefile (make install?)
+
+
 - kernel/user space communication
 
   * possible (even a good idea?) to restart MonitorMe app from kernel
@@ -19,9 +24,16 @@
    call_usermodehelper(char * path, char ** argv, char ** envp, int
    wait);"
 
-  * SElinux doesn't allow netlink anymore (work-around needed?)
+  * SElinux doesn't allow netlink anymore (work-around needed?) One
+   solution could be to build custom kernel set to permissive, or
+   define policy that allows using sockets
+
+  * build *.so with gradle
+
    
 - active monitoring
 
   * idea: modify parameters in the copy_to_user memory before original
    method will be called
+
+   
