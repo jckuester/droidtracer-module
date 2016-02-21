@@ -94,3 +94,6 @@ proguard_cache/
 *.apk
 *.zip
 
+
+preserved.txt
+deadcode.txt

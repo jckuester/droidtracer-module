@@ -87,8 +87,8 @@ public class DroidTracerService extends Service {
     private final IBinder mBinder = new LocalBinder();
 
     // store method-signatures
-    private Map<String, SparseArray<String>> methodNames = new HashMap<String, SparseArray<String>>();
-    private Map<String, SparseArray<String[]>> methodSignatures = new HashMap<String, SparseArray<String[]>>();
+    private Map<String, SparseArray<String>> methodNames = new HashMap<>();
+    private Map<String, SparseArray<String[]>> methodSignatures = new HashMap<>();
 
     ExecutorService executor = Executors.newFixedThreadPool(1);
     protected OnEventCallback callback;
@@ -99,8 +99,14 @@ public class DroidTracerService extends Service {
         System.loadLibrary("droidtracer");
     }
 
+    /* ###
+     * ANDROID SERVICE SPECIFIC METHODS
+     * ### */
+
     @Override
     public void onCreate() {
+        Log.d(logTag, "onCreate");
+
         // run netlink communication in different thread
         executor.execute(new ReceiveEventStream());
     }
@@ -112,18 +118,18 @@ public class DroidTracerService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // We want this service to continue running until it is explicitly
-        // stopped, so return sticky.
+        // called every time startService() is called, also if service is already running
+        //super.onStartCommand(intent, flags, startId);
+
+        Log.d(logTag, "onStartCommand");
+
+        // service shall continue running until explicitly stopped, so return sticky
         startForeground(1, new Notification());
-        return Service.START_NOT_STICKY;
+        return Service.START_STICKY;
     }
 
-    /*
-     * @see android.app.Service#onBind(android.content.Intent)
-     */
     @Override
     public IBinder onBind(Intent intent) {
-        // TODO for communication return IBinder implementation
         return mBinder;
     }
 
@@ -291,6 +297,12 @@ public class DroidTracerService extends Service {
     /*
     // TODO boot image is for my device hardcoded
     public static void flashKprobesKernel() {
+        // e.g. 5.1.1
+        Log.d("Build.VERSION.RELEASE", Build.VERSION.RELEASE);
+        // e.g. hammerhead
+        Log.d("Build.DEVICE", Build.DEVICE);
+        Log.d("os.version", System.getProperty("os.version"));
+
         executeCommand("su", "-c", "dd if='/sdcard/com.monitorme/boot_nexus5_LMY48B_kprobes.img'",
                 "of='/dev/block/platform/msm_sdcc.1/by-name/boot'");
     }
@@ -465,7 +477,7 @@ public class DroidTracerService extends Service {
         }
 
         public void onEvent(int time, int uid, String service, String method,
-                            List<Object> params, String[] paramTypes, long readErrorCount) {
+                            List<?> params, String[] paramTypes, long readErrorCount) {
 
             callback.onEvent(time, uid, service, method, params, paramTypes, readErrorCount);
         }
@@ -480,7 +492,7 @@ public class DroidTracerService extends Service {
         private void onNetlinkSyscall(String syscall, int uid, int time, byte[] data,
                                       int dataSize, long readErrorCount) {
 
-            ArrayList<Object> params = new ArrayList<Object>(1);
+            ArrayList<Object> params = new ArrayList<>(1);
             String[] paramTypes = null;
 
 
@@ -636,7 +648,7 @@ public class DroidTracerService extends Service {
                     if (paramTypes != null) {
                         if (DEBUG) Log.d(logTag, "method argument types: " + paramTypes);
 
-                        params = new ArrayList<Object>(paramTypes.length);
+                        params = new ArrayList<>(paramTypes.length);
                         int i = 0;
 						/*
 						 * 5) unmarshall method arguments from parcel

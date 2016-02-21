@@ -15,3 +15,13 @@
 #-keepclassmembers class fqcn.of.javascript.interface.for.webview {
 #   public *;
 #}
+
+# Preserve all native method names and the names of their classes.
+
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+
+-keep class org.multics.kuester.droidtracer.DroidTracerService {
+   private void onNetlink(...);
+}

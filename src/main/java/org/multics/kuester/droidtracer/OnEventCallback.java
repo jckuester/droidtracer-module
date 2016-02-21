@@ -47,5 +47,5 @@ public interface OnEventCallback {
      * @param eventCounter the accumulated number of events sent since loading of the kernel module
      */
     void onEvent(int time, int uid, String interfaceName, String method,
-                 List<Object> params, String[] paramTypes, long eventCounter);
+                 List<?> params, String[] paramTypes, long eventCounter);
 }
